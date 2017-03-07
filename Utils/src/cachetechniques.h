@@ -3,19 +3,29 @@
 
 #include "assemblyinstructions.h"
 
-unsigned long long reload(void* addr){
-	unsigned long long start = mfence_rdtsc();
-	movl(addr);
-	unsigned long long end = mfence_rdtsc();
-	return end-start;
+unsigned int reload(void* addr) {
+//	size_t start = mfence_lfence_rdtsc();
+//	movl(addr);
+//	size_t end = lfence_rdtsc() - start;
+	return time_movl(addr);
 }
 
-unsigned long long reloadandflush(void* addr){
-	unsigned long long start = mfence_rdtsc();
-	movl(addr);
-	unsigned long long end = mfence_rdtsc();
+void flush(void* addr) {
+//	size_t start = mfence_lfence_rdtsc();
+//	movl(addr);
+//	size_t end = lfence_rdtsc() - start;
 	clflush(addr);
-	return end-start;
+}
+
+unsigned int reloadandflush(void* addr) {
+//	size_t start = mfence_lfence_rdtsc();
+//	movl(addr);
+//	size_t end = lfence_rdtsc() - start;
+//	clflush(addr);
+//	size_t k;
+//	for (k = 0; k < 5; ++k)
+//		sched_yield();
+	return time_movl_clflush(addr);
 }
 
 #endif /* CACHETECHNIQUES_H_ */
