@@ -14,18 +14,28 @@ unsigned long long mfence_lfence_rdtsc() {
 	return tsc;
 }
 
+unsigned long long lfence_rdtsc() {
+	volatile unsigned long long tsc;
+	asm volatile("lfence");
+	asm volatile("rdtsc" : "=A" (tsc));
+	asm volatile("lfence");
+	return tsc;
+}
+
 //- threshold
 unsigned long long rdtscp() {
-	volatile unsigned int low,high;
-	asm volatile ("rdtscp": "=a" (low), "=d" (high) :: "ecx");
-	return (((unsigned long long)high) << 32) | low;
+	volatile unsigned int low, high;
+	asm volatile (" mfence \n"
+			" lfence \n"
+			" rdtscp \n": "=a" (low), "=d" (high) :: "ecx");
+	return (((unsigned long long) high) << 32) | low;
 }
 
 void movl(void* addr) {
 	asm volatile("movl (%0), %%eax\n"
 			:
 			: "r" (addr)
-		    : "%eax");
+			: "%eax");
 }
 
 void clflush(void* addr) {
