@@ -11,12 +11,16 @@ unsigned int reload(void* addr) {
 	return time_movl(addr);
 }
 
-void flush(void* addr) {
-	clflush(addr);
-}
-
 unsigned long long getcurrenttsc() {
 	return rdtscp();
+}
+
+void accessway(void * addr) {
+	movl(addr);
+}
+
+void flush(void* addr) {
+	clflush(addr);
 }
 
 unsigned int reloadandflush(void* addr) {

@@ -1,5 +1,5 @@
-#ifndef CSVUTILS_H_
-#define CSVUTILS_H_
+#ifndef FILEUTILS_H_
+#define FILEUTILS_H_
 
 //#include <string.h>
 
@@ -7,6 +7,35 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h> //close
+
+void arraytodatafile(char dstfilename1[], char dstfilename2[],
+		unsigned short int * src, unsigned int rowsize, unsigned int columnsize) {
+	FILE *fptr, *fptr2;
+	int i, j;
+
+	fptr = fopen(dstfilename1, "w");
+	fptr2 = fopen(dstfilename2, "w");
+	fprintf(fptr, "%d", rowsize);
+	fprintf(fptr2, "%d", rowsize);
+	for (i = 0; i < columnsize; i++) {
+		fprintf(fptr, " %d", i);
+		fprintf(fptr2, " %d", i);
+	}
+	fprintf(fptr, "\n");
+	fprintf(fptr2, "\n");
+	for (i = 0; i < rowsize; i++) {
+		fprintf(fptr, "%d", i);
+		fprintf(fptr2, "%d", i);
+		for (j = 0; j < columnsize; ++j) {
+			fprintf(fptr, " %d", *src);
+			src++;
+			fprintf(fptr2, " %d", *src);
+			src++;
+		}
+		fprintf(fptr, "\n");
+		fprintf(fptr2, "\n");
+	}
+}
 
 void biarraytocsvwheaders(char dstfilename[], long int *headers,
 		unsigned int rowsize, unsigned int columnsize,
@@ -48,4 +77,4 @@ void arraytocsv(char dstfilename[], unsigned int rowsize, unsigned int src[]) {
 	fclose(fptr);
 }
 
-#endif /* CSVUTILS_H_ */
+#endif /* FILEUTILS_H_ */

