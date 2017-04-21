@@ -36,29 +36,107 @@
 //			500 cache lines. 62.5 lines within each set.
 //L2 Cache is 1MB, 16 associative and 32B/cycle bandwidth shared by the 2 cores.
 
+void prime_obtainthreshold(){
+	int set,way;
+	for (set = 0; set < L1D_CACHE_NUMBER_OF_SETS; ++set) {
+		way = L1D_CACHE_NUMBER_OF_WAYS;
+//		printf("--------------------------\n");
+//		printf("SET 64B*6Ways: %X\n",l1dbaseptr);
+
+		//*out_analysis = reloadset(l1dbaseptr, );
+		unsigned long long start = getcurrenttsc();
+		while(way--){
+//			printf("WAY 64B: %X\n",l1dbaseptr);
+			accessway(l1dbaseptr);
+			//Transverse the pointer here
+			l1dbaseptr = (* (void **)l1dbaseptr);
+		}
+		unsigned short int aux = getcurrenttsc()-start;
+	}
+}
+
 unsigned long obtainthreshold() {
 	const int MAX_TIME = 80;
 	const int MAX_WITHOUT_NOISE_ARRAY = 5 * 1024;
 	const int MID_ARRAY = 2 * 1024;
-	unsigned int array[MAX_WITHOUT_NOISE_ARRAY];
 	unsigned int hit_counts[MAX_TIME];
 	unsigned int miss_counts[MAX_TIME];
-	int i;
+	int i,way = L1D_CACHE_NUMBER_OF_WAYS;
+	unsigned long long start,auxend;
 
-	memset(array, -1, MAX_WITHOUT_NOISE_ARRAY * sizeof(unsigned int));
-	reload(array + MID_ARRAY);
+	void *basepointer1, *basepointer2;
+
+	basepointer1 = mmap(0, PAGES_SIZE * L1D_CACHE_NUMBER_OF_WAYS,
+	PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+	if (basepointer1 == MAP_FAILED)
+		handle_error("mmap1");
+
+	preparel1cache(basepointer1);
+
 	sched_yield();
-	//4MB
+
+	void * l1dbaseptr;
+
 	for (i = 0; i < 4 * 1024 * 1024; ++i) {
-		unsigned long time = reload(array + MID_ARRAY) / 5;
-		hit_counts[time > (MAX_TIME - 1) ? MAX_TIME - 1 : time]++;
+
+		//[+] Prime
+		l1dbaseptr = BASE_CACHE_LINE_PTR(basepointer1, 0, 0);
+		int way = L1D_CACHE_NUMBER_OF_WAYS;
+		while(way--){
+			//printf("PRIME: %x\n",l1dbaseptr);
+			start = getcurrenttsc();
+			accessway(l1dbaseptr);
+			//Transverse the pointer here
+			l1dbaseptr = (* (void **)l1dbaseptr);
+		}
+
+		//[+] Probe
+		l1dbaseptr = PREVIOUS_CACHE_LINE_PTR(basepointer1, 0,
+				L1D_CACHE_NUMBER_OF_WAYS-1);
+		way = L1D_CACHE_NUMBER_OF_WAYS;
+		auxend = 0;
+		while(way--){
+			//printf("PROBE: %x\n",l1dbaseptr);
+			start = getcurrenttsc();
+			accessway(l1dbaseptr);
+			//Transverse the pointer here
+			l1dbaseptr = (* (void **)l1dbaseptr);
+			auxend += (getcurrenttsc()-start);
+		}
+		unsigned short int probetime = auxend / 5;
+
+		hit_counts[probetime > (MAX_TIME - 1) ? MAX_TIME - 1 : probetime]++;
 		sched_yield();
 	}
 
 	for (i = 0; i < 4 * 1024 * 1024; ++i) {
-		flush(array + MID_ARRAY);
-		unsigned long time = reload(array + MID_ARRAY) / 5;
-		miss_counts[time > (MAX_TIME - 1) ? MAX_TIME - 1 : time]++;
+		//[+] Prime 1st way in the cache with basepointer1
+		l1dbaseptr = BASE_CACHE_LINE_PTR(basepointer1, 0, 0);
+		int way = L1D_CACHE_NUMBER_OF_WAYS;
+		while(way--){
+			accessway(l1dbaseptr);
+			//Transverse the pointer here
+			l1dbaseptr = (* (void **)l1dbaseptr);
+		}
+
+		//[+] JUST ACCESS 1st way in the cache with basepointer1
+		l1dbaseptr = PREVIOUS_CACHE_LINE_PTR(basepointer1, 0,
+						L1D_CACHE_NUMBER_OF_WAYS-1);
+		way = L1D_CACHE_NUMBER_OF_WAYS;
+
+		auxend = 0;
+		while(way--){
+			flush(l1dbaseptr);
+			start = getcurrenttsc();
+			accessway(l1dbaseptr);
+			//Transverse the pointer here
+			l1dbaseptr = (* (void **)l1dbaseptr);
+			auxend += (getcurrenttsc()-start);
+		}
+		unsigned short int probetime = auxend/5;
+
+		miss_counts[probetime > (MAX_TIME - 1) ? MAX_TIME - 1 : probetime]++;
 		sched_yield();
 	}
 	unsigned int hit_max = 0;
@@ -86,17 +164,6 @@ unsigned long obtainthreshold() {
 	return threshold * 5;
 }
 
-unsigned short int obtaintscof1way(void * l1dbaseptr){
-	int way = L1D_CACHE_NUMBER_OF_WAYS;
-	unsigned long long start = getcurrenttsc();
-	while(way--){
-		accessway(l1dbaseptr);
-		//Transverse the pointer here
-		l1dbaseptr = (* (void **)l1dbaseptr);
-	}
-	return getcurrenttsc()-start;
-}
-
 int setcoreaffinity(int core_id) {
 	int num_cores = sysconf(_SC_NPROCESSORS_ONLN);
 	if (core_id < 0 || core_id >= num_cores)
@@ -117,14 +184,14 @@ void preparel1cache(void * basepointer) {
 					BASE_CACHE_LINE_PTR(basepointer, set, way + 1);
 			// (set,way+1)->previousline = &(set,way)
 			(*(void **) (PREVIOUS_CACHE_LINE_PTR(basepointer, set, way + 1))) =
-					BASE_CACHE_LINE_PTR(basepointer, set, way);
+					PREVIOUS_CACHE_LINE_PTR(basepointer, set, way);
 		}
 		// (set,L1D_CACHE_NUMBER_OF_WAYS-1)->nextline = &(set+1,0);
 		(*(void **) (BASE_CACHE_LINE_PTR(basepointer, set, L1D_CACHE_NUMBER_OF_WAYS-1))) =
 							BASE_CACHE_LINE_PTR(basepointer, set+1, 0);
-		// (set,0-1)->previousline = &(set+1,L1D_CACHE_NUMBER_OF_WAYS-1);
+		// (set,0)->previousline = &(set+1,L1D_CACHE_NUMBER_OF_WAYS-1);
 		(*(void **) (PREVIOUS_CACHE_LINE_PTR(basepointer, set, 0))) =
-							BASE_CACHE_LINE_PTR(basepointer, set+1, L1D_CACHE_NUMBER_OF_WAYS-1);
+				PREVIOUS_CACHE_LINE_PTR(basepointer, set+1, L1D_CACHE_NUMBER_OF_WAYS-1);
 	}
 	// (L1D_CACHE_NUMBER_OF_SETS-1,L1D_CACHE_NUMBER_OF_WAYS-1)->nextline = &(0,0)
 	(*(void **) (BASE_CACHE_LINE_PTR(basepointer, L1D_CACHE_NUMBER_OF_SETS-1,
@@ -138,7 +205,6 @@ void preparel1cache(void * basepointer) {
 		//TODO: really necessary?
 	}
 }
-
 
 
 void analysel1dcache(unsigned short int *out_analysis, void * l1dbaseptr) {
@@ -157,12 +223,26 @@ void analysel1dcache(unsigned short int *out_analysis, void * l1dbaseptr) {
 			l1dbaseptr = (* (void **)l1dbaseptr);
 		}
 		unsigned short int aux = getcurrenttsc()-start;
-		*out_analysis = aux < USHRT_MAX? aux : USHRT_MAX;
+		if(out_analysis != NULL){
+			*out_analysis = aux < USHRT_MAX? aux : USHRT_MAX;
 
 //		printf("AFTER RELOAD SET 64B*6Ways: %X\n",l1dbaseptr);
 //		printf("Analysed UINT: %X\n",out_analysis);
 //		printf("--------------------------\n");
-		out_analysis++;
+			out_analysis++;
+		}
+	}
+}
+
+void flushl1dcache(void * l1dbaseptr) {
+	int set, way;
+	for (set = 0; set < L1D_CACHE_NUMBER_OF_SETS; ++set) {
+		way = L1D_CACHE_NUMBER_OF_WAYS;
+		while(way--){
+			flush(l1dbaseptr);
+			//Transverse the pointer here
+			l1dbaseptr = (* (void **)l1dbaseptr);
+		}
 	}
 }
 
@@ -175,40 +255,45 @@ void delayloop(size_t cycles) {
 int main() {
 	setcoreaffinity(1);
 
-	int i;
-	void * basepointer;
-	unsigned short int *l1d_analysis, *aux;
 
-	basepointer = mmap(0, PAGES_SIZE * L1D_CACHE_NUMBER_OF_WAYS,
-	PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-	if (basepointer == MAP_FAILED)
-		handle_error("mmap");
-	printf("LIST BASE PTR AFTER PREPARE: %X",basepointer);
-	//1st and 2nd state
-	preparel1cache(basepointer);
-	printf("LIST BASE PTR AFTER PREPARE: %X",basepointer);
-	//3rd state
-	//[MAX_TIMES_TO_MONITOR][L1D_CACHE_NUMBER_OF_SETS];
-	l1d_analysis = (unsigned short *) calloc(
-			MAX_TIMES_TO_MONITOR * (L1D_CACHE_NUMBER_OF_SETS*2),
-			sizeof(unsigned short));
+	//Uncomment when obtaining threshold
+	obtainthreshold();
 
-	//delayloop()
-	aux = l1d_analysis;
-	for (i = 0; i < MAX_TIMES_TO_MONITOR; i+=2){
-
-		//Prime
-		analysel1dcache(aux, BASE_CACHE_LINE_PTR(basepointer, 0, 0));
-		aux += L1D_CACHE_NUMBER_OF_SETS;
-		//Probe
-		analysel1dcache(aux,
-				PREVIOUS_CACHE_LINE_PTR(basepointer, L1D_CACHE_NUMBER_OF_SETS-1,
-						L1D_CACHE_NUMBER_OF_WAYS-1));
-
-		aux += L1D_CACHE_NUMBER_OF_SETS;
-	}
-	arraytodatafile(PRIME_ANALYSIS_DATA_FILENAME, PROBE_ANALYSIS_DATA_FILENAME,
-			l1d_analysis, MAX_TIMES_TO_MONITOR, L1D_CACHE_NUMBER_OF_SETS);
+//	int i;
+//	void * basepointer;
+//	unsigned short int *l1d_analysis, *aux;
+//
+//	basepointer = mmap(0, PAGES_SIZE * L1D_CACHE_NUMBER_OF_WAYS,
+//	PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+//	if (basepointer == MAP_FAILED)
+//		handle_error("mmap");
+//	printf("LIST BASE PTR AFTER PREPARE: %X",basepointer);
+//	//1st and 2nd state
+//	preparel1cache(basepointer);
+//	printf("LIST BASE PTR AFTER PREPARE: %X",basepointer);
+//
+//	//3rd state
+//	//[MAX_TIMES_TO_MONITOR][L1D_CACHE_NUMBER_OF_SETS];
+//	l1d_analysis = (unsigned short *) calloc(
+//			MAX_TIMES_TO_MONITOR * (L1D_CACHE_NUMBER_OF_SETS*2),
+//			sizeof(unsigned short));
+//
+//	//delayloop()
+//	aux = l1d_analysis;
+//	for (i = 0; i < MAX_TIMES_TO_MONITOR; i+=2){
+//
+//		//Prime
+//		analysel1dcache(aux, BASE_CACHE_LINE_PTR(basepointer, 0, 0));
+//		aux += L1D_CACHE_NUMBER_OF_SETS;
+//		//Probe
+//		analysel1dcache(aux,
+//				PREVIOUS_CACHE_LINE_PTR(basepointer, L1D_CACHE_NUMBER_OF_SETS-1,
+//						L1D_CACHE_NUMBER_OF_WAYS-1));
+//
+//		aux += L1D_CACHE_NUMBER_OF_SETS;
+//	}
+//	arraytodatafile(PRIME_ANALYSIS_DATA_FILENAME, PROBE_ANALYSIS_DATA_FILENAME,
+//			l1d_analysis, MAX_TIMES_TO_MONITOR, L1D_CACHE_NUMBER_OF_SETS);
 
 	return 0;
 }
