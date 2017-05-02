@@ -37,54 +37,86 @@
 
 #define OUTPUTRAWDATA 1
 
-unsigned long obtainthreshold() {
-	const int MAX_TIME = 80;
-	const int MAX_WITHOUT_NOISE_ARRAY = 5 * 1024;
-	const int MID_ARRAY = 2 * 1024;
-	unsigned int array[MAX_WITHOUT_NOISE_ARRAY];
-	unsigned int hit_counts[MAX_TIME];
-	unsigned int miss_counts[MAX_TIME];
-	int i;
+unsigned long obtainthreshold(int histogramsize, int histogramscale) {
+	const int MAX_RUNS = 4 * 1024 * 1024;
+	const int PAGES_SIZE = 4096;
+	const int MID_ARRAY = PAGES_SIZE/2;
+	void *array;
+	unsigned int *hit_counts;
+	hit_counts = calloc(histogramsize, sizeof(unsigned int));
+	unsigned int *miss_counts;
+	miss_counts = calloc(histogramsize, sizeof(unsigned int));
 
-	memset(array, -1, MAX_WITHOUT_NOISE_ARRAY * sizeof(unsigned int));
+	int i;
+	array = mmap(0, PAGES_SIZE, PROT_READ | PROT_WRITE,
+				MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	reload(array + MID_ARRAY);
 	sched_yield();
 	//4MB
-	for (i = 0; i < 4 * 1024 * 1024; ++i) {
-		unsigned long time = reload(array + MID_ARRAY) / 5;
-		hit_counts[time > (MAX_TIME - 1) ? MAX_TIME - 1 : time]++;
+	for (i = 0; i < MAX_RUNS; ++i) {
+		unsigned long time = reload(array + MID_ARRAY) / histogramscale;
+		hit_counts[time > (histogramsize - 1) ? histogramsize - 1 : time]++;
 		sched_yield();
 	}
 
-	for (i = 0; i < 4 * 1024 * 1024; ++i) {
+	for (i = 0; i < MAX_RUNS; ++i) {
 		flush(array + MID_ARRAY);
-		unsigned long time = reload(array + MID_ARRAY) / 5;
-		miss_counts[time > (MAX_TIME - 1) ? MAX_TIME - 1 : time]++;
+		unsigned long time = reload(array + MID_ARRAY) / histogramscale;
+		miss_counts[time > (histogramsize - 1) ? histogramsize - 1 : time]++;
 		sched_yield();
 	}
-	unsigned int hit_max = 0;
-	unsigned int hit_max_index = 0;
-	unsigned int miss_min_index = 0;
+	unsigned int hitmax = 0;
+	unsigned int missmax = 0;
+	unsigned int hitmaxindex = 0;
+	unsigned int missmaxindex = 0;
+	unsigned int missminindex = 0;
 	printf("TSC:           HITS           MISSES\n");
-	for (i = 0; i < MAX_TIME; ++i) {
-		printf("%3d: %10zu %10zu\n", i * 5, hit_counts[i], miss_counts[i]);
-		if (hit_max < hit_counts[i]) {
-			hit_max = hit_counts[i];
-			hit_max_index = i;
+	for (i = 0; i < histogramsize; ++i) {
+		printf("%3d: %10zu %10zu\n", i * histogramscale, hit_counts[i], miss_counts[i]);
+		if (hitmax < hit_counts[i]) {
+			hitmax = hit_counts[i];
+			hitmaxindex = i;
 		}
-		if (miss_counts[i] > 3 && miss_min_index == 0)
-			miss_min_index = i;
+		if (missmax < miss_counts[i]) {
+			missmax = miss_counts[i];
+			missmaxindex = i;
+		}
+		if (miss_counts[i] > 3 && missminindex == 0)
+			missminindex = i;
 	}
-	unsigned int nr_times_threshold = -1UL;
-	unsigned int threshold = 0;
+	double countcorrectmisses = 0, allmisses = 0, countcorrecthits = 0,
+			allhits = 0, evictionrate = 0, hitsrate = 0;
+	int maxhit = 0, maxmiss = 0, threshold = 0;
+	maxhit = hitmaxindex * histogramscale;
+	maxmiss = missmaxindex * histogramscale;
+	threshold = maxmiss
+			- (maxmiss - maxhit) / 2;
 
-	for (i = hit_max_index; i < miss_min_index; ++i) {
-		if (nr_times_threshold > (hit_counts[i] + miss_counts[i])) {
-			nr_times_threshold = hit_counts[i] + miss_counts[i];
-			threshold = i;
+	for (i = 0; i < histogramsize; ++i) {
+		if (miss_counts[i] > 0 && (i * histogramscale) > threshold) {
+			++countcorrectmisses;
+		}
+		if (miss_counts[i] > 0) {
+			++allmisses;
+		}
+		if (hit_counts[i] > 0 && (i * histogramscale) < threshold) {
+			++countcorrecthits;
+		}
+		if (hit_counts[i] > 0) {
+			++allhits;
 		}
 	}
-	return threshold * 5;
+
+	evictionrate = (countcorrectmisses / allmisses) * 100;
+	hitsrate = (countcorrecthits / allhits) * 100;
+
+	printf("\nMax Hit: %u\n", maxhit);
+	printf("\nMax Miss: %u\n", maxmiss);
+	printf("\nThreshold: %u\n", threshold);
+	printf("\nHits Rate: %lf\%\n", hitsrate);
+	printf("\nEviction Rate: %lf\%\n", evictionrate);
+
+	return threshold;
 }
 
 long int getaddrstomonitor(const char* exeaddrsfilename, long int* out_addrs) {
@@ -329,8 +361,8 @@ void autoobtaindelay() {
 }
 
 int main() {
-//	const unsigned long long threshold = obtainthreshold();
-//	printf("THRESHOLD ::: %llu\n\r", threshold);
+	const unsigned long long threshold = obtainthreshold(80,5);
+	printf("THRESHOLD ::: %llu\n\r", threshold);
 //	const unsigned long long THRESHOLD = 45;
 
 	setcoreaffinity(0);
