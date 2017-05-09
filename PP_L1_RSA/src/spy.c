@@ -222,7 +222,7 @@ void *getphysicaladdr(void *virtualaddr, int pagemap) {
 
 	// Data from: https://www.kernel.org/doc/Documentation/vm/pagemap.txt
 	// Bit 55 is the flag pte is soft-dirty so it need to be cleared
-	pageframenumber &= ((1ULL << 55) - 1);
+	pageframenumber &= ((1ULL << 54) - 1);
 
 	// Calculate the physical addr:  "| PageFramNumber | Offset of the physical addr |"
 	// The offset of the physical address is = "| Index | Offset |" of the virtual addr
@@ -253,8 +253,9 @@ void getphysicalcongruentaddrs(evictionconfig_t *config, l1dcache_t *l1dcache,
 		index_aux = getsetindex(physicaladdr_aux);
 
 		if (set == index_aux && physicaladdr_src != physicaladdr_aux) {
-			l1dcache->congaddrs[set].virtualaddrs[count_found++] =
+			l1dcache->congaddrs[set].virtualaddrs[count_found] =
 					virtualaddr_aux;
+			count_found++;
 		}
 	}
 	if (count_found != virtualaddrslimit)
@@ -294,12 +295,11 @@ unsigned long probel1dcache(evictionconfig_t *config, l1dcache_t *l1dcache,
 
 	int i, addrcount = config->evictionsetsize + config->congruentvirtualaddrs
 			- 1;
-	congruentaddrs_t congaddrs = l1dcache->congaddrs[set];
 
-	if (congaddrs.wasaccessed == 0) {
+	if (l1dcache->congaddrs[set].wasaccessed == 0) {
 		getphysicalcongruentaddrs(config, l1dcache, set, physicaladdr);
 	}
-
+	congruentaddrs_t congaddrs = l1dcache->congaddrs[set];
 	for (i = addrcount - 1; i >= 0; --i) {
 		accessway(congaddrs.virtualaddrs[i]);
 	}
@@ -308,9 +308,6 @@ unsigned long probel1dcache(evictionconfig_t *config, l1dcache_t *l1dcache,
 	return getcurrenttsc() - start;
 }
 
-void analysel1dcache2(unsigned short int *out_analysis, l1dcache_t *l1dcache) {
-
-}
 
 void obtainevictiondata(int mappedsize, int evictionsetsize, int sameeviction,
 		int congruentvirtualaddrs, int histogramsize, int histogramscale,
@@ -359,7 +356,7 @@ void obtainevictiondata(int mappedsize, int evictionsetsize, int sameeviction,
 
 	// Hit histogram
 	for (i = 0; i < MAX_RUNS; ++i) {
-		primel1dcache(config, l1dcache, set, physicaladdr);
+		//primel1dcache(config, l1dcache, set, physicaladdr);
 		unsigned long probetime = probel1dcache(config, l1dcache, set,
 				physicaladdr) / histogramscale;
 		hit_counts[
@@ -384,7 +381,7 @@ void obtainevictiondata(int mappedsize, int evictionsetsize, int sameeviction,
 	// Miss histogram
 	for (i = 0; i < MAX_RUNS; ++i) {
 		primel1dcache(config, l1dcache, set, physicaladdr);
-		flush(array + MID_ARRAY);
+		accessway(array + MID_ARRAY);
 		unsigned long probetime = probel1dcache(config, l1dcache, set,
 				physicaladdr) / histogramscale;
 		miss_counts[
@@ -408,8 +405,8 @@ void obtainevictiondata(int mappedsize, int evictionsetsize, int sameeviction,
 	unsigned int missminindex = 0;
 //	printf("TSC:           HITS           MISSES\n");
 	for (i = 0; i < histogramsize; ++i) {
-		printf("%3d: %10zu %10zu\n", i * histogramscale, hit_counts[i],
-				miss_counts[i]);
+//		printf("%3d: %10zu %10zu\n", i * histogramscale, hit_counts[i],
+//				miss_counts[i]);
 		if (hitmax < hit_counts[i]) {
 			hitmax = hit_counts[i];
 			hitmaxindex = i;
@@ -462,17 +459,30 @@ int main() {
 
 	//Uncomment when obtaining threshold
 	evictiondata_t *evictiondata = calloc(1, sizeof(evictiondata_t));
-	obtainevictiondata((1024 * 1024), 6, 2, 2, /*Histogram size*/300, /*Histogram scale*/
-	5, evictiondata);
-	if (evictiondata->maxhit < evictiondata->maxmiss) {
-		printf("\nMax Hit: %u\n", evictiondata->maxhit);
-		printf("\nMax Miss: %u\n", evictiondata->maxmiss);
-		printf("\nThreshold: %u\n", evictiondata->threshold);
-		printf("\nHits Rate: %lf\%\n", evictiondata->hitsrate);
-		printf("\nEviction Rate: %lf\%\n", evictiondata->evictionrate);
-	} else {
-		printf("\n[!] Cycles of Hit >= Cycles of Miss [!]\n");
+	int i;
+
+	// TODO Remove:
+	// Paper Cache-access pattern attack on disaligned AES t-tables
+	// (3/4)^(4*3) = 1.367% probability L1D Cache not being totally evicted
+	const int NUMBER_TIMES_FOR_THE_TOTAL_EVICION = 3;
+	int mappedsize = (L1D_CACHE_NUMBER_OF_SETS * L1D_CACHE_NUMBER_OF_WAYS * L1D_CACHE_LINE_NUMBER_OF_BYTES)*NUMBER_TIMES_FOR_THE_TOTAL_EVICION;
+	for (i = 5; i < 30;++i){
+		obtainevictiondata(mappedsize, i, 1, 1, /*Histogram size*/300, /*Histogram scale*/
+		5, evictiondata);
+		printf("\n i: %d\n",i);
+		if(evictiondata->evictionrate > 50){
+			if (evictiondata->maxhit >= evictiondata->maxmiss) {
+				printf("[!] Cycles of Hit >= Cycles of Miss [!]\n");
+			}
+			printf("Max Hit: %u\n", evictiondata->maxhit);
+			printf("Max Miss: %u\n", evictiondata->maxmiss);
+			printf("Threshold: %u\n", evictiondata->threshold);
+			printf("Hits Rate: %lf\%\n", evictiondata->hitsrate);
+			printf("Eviction Rate: %lf\%\n", evictiondata->evictionrate);
+
+		}
 	}
+
 
 //	int i;
 //	void * basepointer;

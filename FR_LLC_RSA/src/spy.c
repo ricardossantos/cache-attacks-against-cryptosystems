@@ -10,6 +10,7 @@
 #include <unistd.h> //close
 #include <sched.h>
 #include <pthread.h>
+#include "spy.h"
 #include "../../Utils/src/assemblyinstructions.h"
 #include "../../Utils/src/cachetechniques.h"
 #include "../../Utils/src/fileutils.h"
@@ -22,10 +23,6 @@
 #define EXE_ADDRS_FILENAME "/home/root/thesis-code/exe_addresses.txt"
 
 #define ANALYSIS_CSV_FILENAME "/home/root/thesis-code/static_analysis.csv"
-
-#define MAX_ADDRS_TO_MONITOR 10
-
-#define MAX_TIMES_TO_MONITOR_EACH_ADDRS 300000
 
 #define GPG_MAX_SIZE_BYTES 4194304
 
@@ -206,15 +203,6 @@ void missedalladdrs(unsigned int *out_analysis, unsigned long ptr_offset,
 	}
 }
 
-#define CMD_DECRYPT_STR "taskset 0x00000001 echo 1a2b3cinesc | /home/root/gnupg-1.4.12/bin/gpg --passphrase-fd 0 /home/root/gnupg-1.4.12/bin/message.txt.gpg"
-#define CMD_RM_DECRYPT_STR "rm /home/root/gnupg-1.4.12/bin/*.txt"
-void synchronouslyrungnupg() {
-	//COMMENT WHEN ENCRYPT
-	int errno = system(CMD_DECRYPT_STR);
-	int errno1 = system(CMD_RM_DECRYPT_STR);
-	if (errno == -1 || errno1 == -1)
-		handle_error("system() running gnupg or removing files");
-}
 
 //0-square
 //1-reduce
@@ -361,7 +349,7 @@ void autoobtaindelay() {
 }
 
 int main() {
-	const unsigned long long threshold = obtainthreshold(80,5);
+	const unsigned long long threshold = obtainthreshold(300,5);
 	printf("THRESHOLD ::: %llu\n\r", threshold);
 //	const unsigned long long THRESHOLD = 45;
 
