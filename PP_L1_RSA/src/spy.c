@@ -35,22 +35,6 @@
 #define PRIME_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/prime_static_analysis.data"
 #define PROBE_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/probe_static_analysis.data"
 
-void delayloop(size_t cycles) {
-	unsigned long long start = rdtscp();
-	while ((rdtscp() - start) < cycles)
-		;
-}
-
-int setcoreaffinity(int core_id) {
-	int num_cores = sysconf(_SC_NPROCESSORS_ONLN);
-	if (core_id < 0 || core_id >= num_cores)
-		handle_error("Wrong core id");
-	cpu_set_t cpuset;
-	CPU_ZERO(&cpuset);
-	CPU_SET(core_id, &cpuset);
-	return sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
-}
-
 /* [+] BEGIN [+] Least Recently Used Replacement Policy <- No need to this type of attack */
 
 //void preparel1cache(void * basepointer) {

@@ -8,33 +8,42 @@
 #include <stdio.h>
 #include <unistd.h> //close
 
-void arraytodatafile(char dstfilename1[], char dstfilename2[],
-		unsigned short int * src, unsigned int rowsize, unsigned int columnsize) {
-	FILE *fptr, *fptr2;
+void arraytodatafile(char dstfilename[], unsigned short int * src,
+		unsigned int rowsize, unsigned int columnsize) {
+	FILE *fptr;
 	int i, j;
 
-	fptr = fopen(dstfilename1, "w");
-	fptr2 = fopen(dstfilename2, "w");
+	fptr = fopen(dstfilename, "w");
 	fprintf(fptr, "%d", rowsize);
-	fprintf(fptr2, "%d", rowsize);
 	for (i = 0; i < columnsize; i++) {
 		fprintf(fptr, " %d", i);
-		fprintf(fptr2, " %d", i);
 	}
 	fprintf(fptr, "\n");
-	fprintf(fptr2, "\n");
 	for (i = 0; i < rowsize; i++) {
 		fprintf(fptr, "%d", i);
-		fprintf(fptr2, "%d", i);
 		for (j = 0; j < columnsize; ++j) {
 			fprintf(fptr, " %d", *src);
 			src++;
-			fprintf(fptr2, " %d", *src);
+		}
+		fprintf(fptr, "\n");
+	}
+	fprintf(fptr, "%s\n", "e");
+}
+
+void arraytodatafilewithoutlabels(char dstfilename[], unsigned short int * src,
+		unsigned int rowsize, unsigned int columnsize) {
+	FILE *fptr;
+	int i, j;
+
+	fptr = fopen(dstfilename, "w");
+	for (i = 0; i < rowsize; i++) {
+		for (j = 0; j < columnsize; ++j) {
+			fprintf(fptr, " %d", *src);
 			src++;
 		}
 		fprintf(fptr, "\n");
-		fprintf(fptr2, "\n");
 	}
+	fprintf(fptr, "%s\n", "e");
 }
 
 void biarraytocsvwheaders(char dstfilename[], long int *headers,
