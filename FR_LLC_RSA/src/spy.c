@@ -1,19 +1,13 @@
 #define _GNU_SOURCE
 #include "../../Utils/src/flushspy.h"
-#include "../../Utils/src/assemblyinstructions.h"
 #include "../../Utils/src/cachetechniques.h"
 #include "../../Utils/src/fileutils.h"
 
-#define ANALYSIS_CSV_FILENAME "/home/root/thesis-code/static_analysis.csv"
-
+#define ANALYSIS_CSV_FILENAME "/home/root/thesis-code/flush_reload_static_analysis.csv"
 #define GPG_MAX_SIZE_BYTES 4194304
-
 #define THRESHOLD 45
-
 #define DELAYFORVICTIMACTIVITY 2800
-
 #define MAXIDLECOUNT 500
-
 #define OUTPUTRAWDATA 1
 
 unsigned long obtainthreshold(int histogramsize, int histogramscale) {
@@ -96,14 +90,6 @@ unsigned long obtainthreshold(int histogramsize, int histogramscale) {
 	printf("\nEviction Rate: %lf\%\n", evictionrate);
 
 	return threshold;
-}
-
-void missedalladdrs(unsigned int *out_analysis, unsigned long ptr_offset,
-		long int *exe_addrs, int nr_addrs) {
-	int addrs_index;
-	for (addrs_index = 0; addrs_index < nr_addrs; ++addrs_index) {
-		out_analysis[addrs_index] = 0;
-	}
 }
 
 //0-square
@@ -191,8 +177,8 @@ int analysecache(int delay, long int exe_addrs[MAX_ADDRS_TO_MONITOR],
 		do {
 			start += delay;
 		} while (missedvictimactivity(start));
-		fr_analysealladdrs(OUTPUTRAWDATA, analysis_array[0], ptr_offset, exe_addrs,
-				nr_addrs,
+		fr_analysealladdrs(OUTPUTRAWDATA, analysis_array[0], ptr_offset,
+				exe_addrs, nr_addrs,
 				THRESHOLD);
 	} while (!isvictimactive(analysis_array[0], nr_addrs,
 	OUTPUTRAWDATA ? THRESHOLD : 2));

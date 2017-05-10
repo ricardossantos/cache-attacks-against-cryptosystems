@@ -1,9 +1,3 @@
-/*
- * flushspy.h
- *
- *  Created on: 10/05/2017
- *      Author: Ricardo-PC
- */
 
 #ifndef FLUSHSPY_H_
 #define FLUSHSPY_H_
@@ -12,9 +6,6 @@
 #define MAX_TIMES_TO_MONITOR_EACH_ADDRS 300000
 
 unsigned long obtainthreshold(int histogramsize, int histogramscale) ;
-
-void missedalladdrs(unsigned int *out_analysis, unsigned long ptr_offset,
-		long int *exe_addrs, int nr_addrs) ;
 
 void obtainmaxtimesabovethreshold(unsigned int* numberoftimesabovethreshold,
 		unsigned int threshold, unsigned int rowsize, unsigned int columnsize,

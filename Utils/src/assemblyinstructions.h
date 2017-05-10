@@ -62,12 +62,30 @@ unsigned int time_movl_clflush(void* addr) {
 	return time;
 }
 
+unsigned int time_clflush_clflush(void* addr) {
+	volatile unsigned int time;
+	asm volatile(
+			" mfence \n"
+			" lfence \n"
+			" rdtscp \n"
+			" mov %%eax, %%esi \n"
+			" clflush 0(%1) \n"
+			" rdtscp \n"
+			" sub %%esi, %%eax \n"
+			" clflush 0(%1) \n"
+			: "=&a" (time)
+			: "r" (addr)
+			: "%esi", "%edx", "ecx");
+	return time;
+}
+
 unsigned int time_clflush(void* addr) {
 	volatile unsigned int time;
 	asm volatile(
 			" mfence \n"
 			" lfence \n"
 			" rdtscp \n"
+			" mov %%eax, %%esi \n"
 			" clflush 0(%1) \n"
 			" rdtscp \n"
 			" sub %%esi, %%eax \n"
