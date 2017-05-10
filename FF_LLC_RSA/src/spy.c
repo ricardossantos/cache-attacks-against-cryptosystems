@@ -1,4 +1,5 @@
 #include "../../Utils/src/cachetechniques.h"
+#include "../../Utils/src/flushspy.h"
 
 #define MAX_ADDRS_TO_MONITOR 10
 #define MAX_TIMES_TO_MONITOR_EACH_ADDRS 300000
@@ -86,12 +87,9 @@ unsigned long obtainthreshold(int histogramsize, int histogramscale) {
 	return threshold;
 }
 
-
-
-int main()
-{
+int main() {
 	//Obtain threshold
-	unsigned long threshold = obtainthreshold(300,5);
+	unsigned long threshold = obtainthreshold(300, 5);
 
 	long int exe_addrs[MAX_ADDRS_TO_MONITOR];
 	int nr_addrs;
@@ -101,6 +99,13 @@ int main()
 
 	unsigned int analysis_array[MAX_TIMES_TO_MONITOR_EACH_ADDRS][nr_addrs];
 
+	//analyse LLC
+	int analysis_array_length = analysecache(DELAYFORVICTIMACTIVITY, exe_addrs,
+			nr_addrs, analysis_array);
+
+	//results to csv file
+	biarraytocsvwheaders(ANALYSIS_CSV_FILENAME, exe_addrs,
+			analysis_array_length, nr_addrs, analysis_array);
 
 	return 0;
 }

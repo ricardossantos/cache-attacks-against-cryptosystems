@@ -1,5 +1,12 @@
-#ifndef SPY_H_
-#define SPY_H_
+/*
+ * flushspy.h
+ *
+ *  Created on: 10/05/2017
+ *      Author: Ricardo-PC
+ */
+
+#ifndef FLUSHSPY_H_
+#define FLUSHSPY_H_
 
 #define MAX_ADDRS_TO_MONITOR 10
 #define MAX_TIMES_TO_MONITOR_EACH_ADDRS 300000
@@ -23,5 +30,4 @@ int analysecache(int delay, long int exe_addrs[MAX_ADDRS_TO_MONITOR],
 
 void autoobtaindelay();
 
-
-#endif /* SPY_H_ */
+#endif /* FLUSHSPY_H_ */

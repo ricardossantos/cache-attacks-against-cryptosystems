@@ -1,7 +1,6 @@
 #include "../../Utils/src/cachetechniques.h"
 #include "../../Utils/src/performancecounters.h"
 #include "../../Utils/src/fileutils.h"
-#include "../../FR_LLC_RSA/src/spy.h"
 
 #define PAGES_SIZE 4096
 #define NR_OF_ADDRS 64
@@ -352,7 +351,7 @@ void analysellc(int set, llcache_t *llcache, evictionconfig_t *config,
 		int maxruns) {
 	int i;
 
-	for (i = set - 1; i < maxruns; i += LL_CACHE_NUMBER_OF_SETS) {
+	for (i = set; i < maxruns; i += LL_CACHE_NUMBER_OF_SETS) {
 
 		//Prime
 		primellcache(config, llcache, set);
@@ -368,6 +367,8 @@ void analysellc(int set, llcache_t *llcache, evictionconfig_t *config,
 #define OUTPUTRAWDATA 1
 #define DELAYFORVICTIMACTIVITY 2800
 #define NUMBER_OF_EXE_ADDRS 3
+#define MAX_ADDRS_TO_MONITOR 10
+#define MAX_TIMES_TO_MONITOR_EACH_ADDRS 300000
 
 typedef struct waitforvictim {
 	int nr_addrs;
@@ -463,14 +464,14 @@ int main() {
 	prepareevictconfig(&config, evictionsetsize, sameeviction,
 			congruentvirtualaddrs);
 	preparewaitforactivity(&waitforvictim);
-	for (setidx = 1; setidx <= LL_CACHE_NUMBER_OF_SETS; ++setidx) {
+	for (setidx = 0; setidx < LL_CACHE_NUMBER_OF_SETS; ++setidx) {
 		printf("\nWaiting for activity...\n");
 
 		waitforvictimactivity(waitforvictim);
 
 		//int setidx = 1;
 		printf("Analyse set number: %d\n", setidx);
-		analysellc(setidx, llcache, config, MAX_TIMES_TO_CSV);
+		analysellc(setidx, llcache, config, MAX_TIMES_TO_CSV * LL_CACHE_NUMBER_OF_SETS);
 	}
 
 	arraytodatafilewithoutlabels(PROBE_ANALYSIS_DATA_FILENAME,

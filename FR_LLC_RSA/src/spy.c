@@ -1,5 +1,5 @@
 #define _GNU_SOURCE
-#include "spy.h"
+#include "../../Utils/src/flushspy.h"
 #include "../../Utils/src/assemblyinstructions.h"
 #include "../../Utils/src/cachetechniques.h"
 #include "../../Utils/src/fileutils.h"
