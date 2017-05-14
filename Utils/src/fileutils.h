@@ -22,7 +22,9 @@ void arraytodatafile(char dstfilename[], unsigned short int * src,
 	for (i = 0; i < rowsize; i++) {
 		fprintf(fptr, "%d", i);
 		for (j = 0; j < columnsize; ++j) {
-			fprintf(fptr, " %d", *src);
+			fprintf(fptr, "%d ", *src);
+			if(j == columnsize-1)
+				fprintf(fptr, "%d", *src);
 			src++;
 		}
 		fprintf(fptr, "\n");
@@ -38,7 +40,9 @@ void arraytodatafilewithoutlabels(char dstfilename[], unsigned short int * src,
 	fptr = fopen(dstfilename, "w");
 	for (i = 0; i < rowsize; i++) {
 		for (j = 0; j < columnsize; ++j) {
-			fprintf(fptr, " %d", *src);
+			fprintf(fptr, "%d ", *src);
+			if(j == columnsize-1)
+				fprintf(fptr, "%d", *src);
 			src++;
 		}
 		fprintf(fptr, "\n");
@@ -46,7 +50,7 @@ void arraytodatafilewithoutlabels(char dstfilename[], unsigned short int * src,
 	fprintf(fptr, "%s\n", "e");
 }
 
-void biarraytocsvwheaders(char dstfilename[], long int *headers,
+void biarraytocsvwithhexheaders(char dstfilename[], long int *headers,
 		unsigned int rowsize, unsigned int columnsize,
 		unsigned int src[][columnsize]) {
 	FILE* fptr;
@@ -56,6 +60,21 @@ void biarraytocsvwheaders(char dstfilename[], long int *headers,
 	for (i = 0; i < rowsize; i++) {
 		for (j = 0; j < columnsize; ++j) {
 			fprintf(fptr, "%d,%u,0x%X\n", i, src[i][j], headers[j]);
+		}
+	}
+	fclose(fptr);
+}
+
+void biarraytocsvwithstrheaders(char dstfilename[], char **headers,
+		unsigned int rowsize, unsigned int columnsize,
+		unsigned int src[][columnsize]) {
+	FILE* fptr;
+	int i, j;
+
+	fptr = fopen(dstfilename, "w");
+	for (i = 0; i < rowsize; i++) {
+		for (j = 0; j < columnsize; ++j) {
+			fprintf(fptr, "%d,%u,%s\n", i, src[i][j], headers[j]);
 		}
 	}
 	fclose(fptr);

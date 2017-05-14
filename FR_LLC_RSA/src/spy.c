@@ -9,8 +9,21 @@
 #define DELAYFORVICTIMACTIVITY 2800
 #define MAXIDLECOUNT 500
 #define OUTPUTRAWDATA 1
+#define VARIATION_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/fr_llc_hit_miss_variation_static_analysis.data"
 
-unsigned long obtainthreshold(int histogramsize, int histogramscale) {
+typedef struct evictiondata {
+	unsigned int maxhit;
+	unsigned int maxmiss;
+	int threshold;
+	double countcorrecthits;
+	double allhits;
+	double hitsrate;
+	double countcorrectmisses;
+	double allmisses;
+	double evictionrate;
+}evictiondata_t;
+
+void obtainthreshold(int histogramsize, int histogramscale, evictiondata_t *evictiondata) {
 	const int MAX_RUNS = 4 * 1024 * 1024;
 	const int PAGES_SIZE = 4096;
 	const int MID_ARRAY = PAGES_SIZE / 2;
@@ -58,12 +71,11 @@ unsigned long obtainthreshold(int histogramsize, int histogramscale) {
 		if (miss_counts[i] > 3 && missminindex == 0)
 			missminindex = i;
 	}
-	double countcorrectmisses = 0, allmisses = 0, countcorrecthits = 0,
-			allhits = 0, evictionrate = 0, hitsrate = 0;
+	double countcorrectmisses = 0, allmisses = 0, countcorrecthits = 0, allhits = 0;
 	int maxhit = 0, maxmiss = 0, threshold = 0;
-	maxhit = hitmaxindex * histogramscale;
-	maxmiss = missmaxindex * histogramscale;
-	threshold = maxmiss - (maxmiss - maxhit) / 2;
+	evictiondata->maxhit = hitmaxindex * histogramscale;
+	evictiondata->maxmiss = missmaxindex * histogramscale;
+	evictiondata->threshold = maxmiss - (maxmiss - maxhit) / 2;
 
 	for (i = 0; i < histogramsize; ++i) {
 		if (miss_counts[i] > 0 && (i * histogramscale) > threshold) {
@@ -80,16 +92,19 @@ unsigned long obtainthreshold(int histogramsize, int histogramscale) {
 		}
 	}
 
-	evictionrate = (countcorrectmisses / allmisses) * 100;
-	hitsrate = (countcorrecthits / allhits) * 100;
+	evictiondata->countcorrecthits = countcorrecthits;
+	evictiondata->countcorrectmisses = countcorrectmisses;
+	evictiondata->allhits = allhits;
+	evictiondata->allmisses = allmisses;
+	evictiondata->evictionrate = (countcorrectmisses / allmisses) * 100;
+	evictiondata->hitsrate = (countcorrecthits / allhits) * 100;
 
-	printf("\nMax Hit: %u\n", maxhit);
-	printf("\nMax Miss: %u\n", maxmiss);
-	printf("\nThreshold: %u\n", threshold);
-	printf("\nHits Rate: %lf\%\n", hitsrate);
-	printf("\nEviction Rate: %lf\%\n", evictionrate);
+	printf("\nMax Hit: %u\n", evictiondata->maxhit);
+	printf("\nMax Miss: %u\n", evictiondata->maxmiss);
+	printf("\nThreshold: %u\n", evictiondata->threshold);
+	printf("\nHits Rate: %lf\%\n", evictiondata->hitsrate);
+	printf("\nEviction Rate: %lf\%\n", evictiondata->evictionrate);
 
-	return threshold;
 }
 
 //0-square
@@ -235,14 +250,38 @@ void autoobtaindelay() {
 				analysis_array, delay_array[i]);
 		++i;
 	}
-	biarraytocsvwheaders(ANALYSIS_CSV_FILENAME, exe_addrs, i, nr_addrs,
+	biarraytocsvwithhexheaders(ANALYSIS_CSV_FILENAME, exe_addrs, i, nr_addrs,
 			delay_array);
 
 }
 
+void analysehitandmissvariation() {
+	int i;
+	evictiondata_t *evictiondata = calloc(1, sizeof(evictiondata_t));
+	const int headerssize = 2;
+	const int analysissize = 20;
+
+	unsigned int analysis_array[analysissize][headerssize];
+
+	for (i = 0; i < analysissize; ++i) {
+		obtainthreshold(300, 5, evictiondata);
+		analysis_array[i][0] = evictiondata->maxhit;
+		analysis_array[i][1] = evictiondata->maxmiss;
+	}
+	const char *headers[headerssize];
+	headers[0] = "Hits";
+	headers[1] = "Misses";
+	biarraytocsvwithstrheaders(VARIATION_ANALYSIS_DATA_FILENAME, headers,
+			analysissize, headerssize, analysis_array);
+}
+
 int main() {
-	const unsigned long threshold = obtainthreshold(300, 5);
-	printf("THRESHOLD ::: %llu\n\r", threshold);
+
+	//analysehitandmissvariation();
+
+	evictiondata_t *evictiondata = calloc(1, sizeof(evictiondata_t));
+	obtainthreshold(300, 5,evictiondata);
+	printf("THRESHOLD ::: %d\n\r", evictiondata->threshold);
 //	const unsigned long long THRESHOLD = 45;
 
 	setcoreaffinity(0);
@@ -262,7 +301,7 @@ int main() {
 			nr_addrs, analysis_array);
 
 	//results to csv file
-	biarraytocsvwheaders(ANALYSIS_CSV_FILENAME, exe_addrs,
+	biarraytocsvwithhexheaders(ANALYSIS_CSV_FILENAME, exe_addrs,
 			analysis_array_length, nr_addrs, analysis_array);
 
 	unsigned int out_numberofbits[nr_addrs];

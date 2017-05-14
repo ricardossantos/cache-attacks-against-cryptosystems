@@ -5,7 +5,6 @@
 #define MAX_ADDRS_TO_MONITOR 10
 #define MAX_TIMES_TO_MONITOR_EACH_ADDRS 300000
 
-unsigned long obtainthreshold(int histogramsize, int histogramscale) ;
 
 void obtainmaxtimesabovethreshold(unsigned int* numberoftimesabovethreshold,
 		unsigned int threshold, unsigned int rowsize, unsigned int columnsize,

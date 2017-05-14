@@ -179,7 +179,7 @@ int main() {
 			nr_addrs, analysis_array);
 
 	//results to csv file
-	biarraytocsvwheaders(ANALYSIS_CSV_FILENAME, exe_addrs,
+	biarraytocsvwithhexheaders(ANALYSIS_CSV_FILENAME, exe_addrs,
 			analysis_array_length, nr_addrs, analysis_array);
 
 	return 0;
