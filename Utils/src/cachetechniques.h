@@ -34,6 +34,10 @@ void accessway(void * addr) {
 	movl(addr);
 }
 
+unsigned int timeaccessway(void *addr){
+	return time_movl(addr);
+}
+
 void flush(void* addr) {
 	clflush(addr);
 }
