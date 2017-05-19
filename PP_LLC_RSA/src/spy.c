@@ -3,10 +3,10 @@
 #include "../../Utils/src/fileutils.h"
 
 #define PAGES_SIZE 4096
-#define NR_OF_ADDRS 64
+#define NR_OF_ADDRS 512
 #define LL_CACHE_NR_OF_BITS_OF_OFFSET 6
 #define LL_CACHE_NUMBER_OF_SETS 1024
-#define DEBUG_NR_SETS 256
+#define DEBUG_NR_SETS 1024
 #define LL_CACHE_NUMBER_OF_WAYS 16
 #define LL_CACHE_LINE_NUMBER_OF_BYTES 64
 #define PAGEMAP_INFO_SIZE 8 /*There are 64 bits of info for each page on the pagemap*/
@@ -27,7 +27,7 @@ typedef struct llcache {
 	void *llcachebasepointer;
 	int mappedsize;
 	int pagemap;
-	unsigned short int llc_analysis[MAX_TIMES_TO_CSV * LL_CACHE_NUMBER_OF_SETS];
+	unsigned short int llc_analysis[MAX_TIMES_TO_CSV * DEBUG_NR_SETS/*LL_CACHE_NUMBER_OF_SETS*/];
 } llcache_t;
 
 typedef struct evictionconfig {
@@ -351,7 +351,7 @@ void analysellc(int set, llcache_t *llcache, evictionconfig_t *config,
 		int maxruns) {
 	int i;
 
-	for (i = set; i < maxruns; i += LL_CACHE_NUMBER_OF_SETS) {
+	for (i = set; i < maxruns; i += DEBUG_NR_SETS/*LL_CACHE_NUMBER_OF_SETS*/) {
 
 		//Prime
 		primellcache(config, llcache, set);
@@ -425,19 +425,6 @@ void waitforvictimactivity(waitforvictim_t *waitforvictim) {
 			OUTPUTRAWDATA ? THRESHOLD : 2));
 }
 
-//TODO: remove?
-void meananalysis(llcache_t *llcache) {
-	int i, j, sum, count = 0;
-	int analysissize = MAX_TIMES_TO_CSV * LL_CACHE_NUMBER_OF_SETS;
-	for (i = 0; i < analysissize; i += LL_CACHE_NUMBER_OF_SETS, ++count) {
-		sum = 0, count = 0;
-		if (count > (analysissize / 20)) {
-			sum += llcache->llc_analysis[i];
-			count = 0;
-		}
-	}
-}
-
 void analysehitandmissvariation(int analysissize, int evictionsetsize,
 		int sameeviction, int congruentvirtualaddrs, int histogramsize,
 		int histogramscale) {
@@ -482,14 +469,14 @@ int main() {
 
 	const int histogramsize = 1000;
 	const int histogramscale = 5;
+//Uncomment
+//	const int evictionsetsize = 16;
+//	const int sameeviction = 30;
+//	const int differentvirtualaddrs = 4;
+//	const int analysissize = 30;
 
-	const int evictionsetsize = 20;
-	const int sameeviction = 12;
-	const int congruentvirtualaddrs = 1;
-	const int analysissize = 30;
-
-	analysehitandmissvariation(analysissize, evictionsetsize, sameeviction,
-			congruentvirtualaddrs, histogramsize, histogramscale);
+//	analysehitandmissvariation(analysissize, evictionsetsize, sameeviction,
+//			differentvirtualaddrs, histogramsize, histogramscale);
 
 	evictiondata_t *evictiondata = calloc(1, sizeof(evictiondata_t));
 	int mappedsize;
@@ -504,46 +491,55 @@ int main() {
 	evictionconfig_t *config;
 
 	preparellcache(&llcache, mappedsize);
-	prepareevictconfig(&config, evictionsetsize, sameeviction,
-			congruentvirtualaddrs);
-
-	obtainevictiondata(mappedsize, evictionsetsize, sameeviction,
-			congruentvirtualaddrs, /*Histogram size*/histogramsize, /*Histogram scale*/
-			histogramscale,
-			MAX_TIMES_TO_OBTAIN_THRESHOLD, evictiondata, llcache, config);
-	if (evictiondata->evictionrate > 50) {
-		if (evictiondata->maxhit >= evictiondata->maxmiss) {
-			printf("[!] Cycles of Hit >= Cycles of Miss [!]\n");
+//Uncomment
+//	prepareevictconfig(&config, evictionsetsize, sameeviction,
+//			differentvirtualaddrs);
+	int eviction=1,diff=1,same=1;
+	for(eviction = 16;eviction < 25;eviction += 1){
+		for(same = 1;same < 60;same += 5){
+			//for(diff = 2;diff < 4;diff += 2){
+				prepareevictconfig(&config, eviction, same,diff);
+				obtainevictiondata(mappedsize,eviction /*evictionsetsize*/, same /*sameeviction*/,
+						diff /*differentvirtualaddrs*/, /*Histogram size*/histogramsize, /*Histogram scale*/
+						histogramscale,
+						MAX_TIMES_TO_OBTAIN_THRESHOLD, evictiondata, llcache, config);
+				if (evictiondata->evictionrate > 50) {
+					printf("Eviction NR: %d. Same NR: %d. Different NR: %d.\n", eviction,same,diff);
+					if (evictiondata->maxhit >= evictiondata->maxmiss) {
+						printf("[!] Cycles of Hit >= Cycles of Miss [!]\n");
+					}
+		//Uncomment
+		//			printf("Max Hit: %u\n", evictiondata->maxhit);
+		//			printf("Max Miss: %u\n", evictiondata->maxmiss);
+		//			printf("Threshold: %u\n", evictiondata->threshold);
+		//			printf("Hits Rate: %lf\%\n", evictiondata->hitsrate);
+					printf("Eviction Rate: %lf\%\n", evictiondata->evictionrate);
+				}
+			//}
 		}
-		printf("Max Hit: %u\n", evictiondata->maxhit);
-		printf("Max Miss: %u\n", evictiondata->maxmiss);
-		printf("Threshold: %u\n", evictiondata->threshold);
-		printf("Hits Rate: %lf\%\n", evictiondata->hitsrate);
-		printf("Eviction Rate: %lf\%\n", evictiondata->evictionrate);
-
 	}
-
-	waitforvictim_t *waitforvictim;
-	int setidx;
-
-	preparellcache(&llcache, mappedsize);
-	prepareevictconfig(&config, evictionsetsize, sameeviction,
-			congruentvirtualaddrs);
-	preparewaitforactivity(&waitforvictim);
-	for (setidx = 0; setidx < DEBUG_NR_SETS/*LL_CACHE_NUMBER_OF_SETS*/; ++setidx) {
-		printf("\nWaiting for activity...\n");
-
-		waitforvictimactivity(waitforvictim);
-
-		//int setidx = 1;
-		printf("Analyse set number: %d\n", setidx);
-		analysellc(setidx, llcache, config,
-		MAX_TIMES_TO_CSV * DEBUG_NR_SETS/*LL_CACHE_NUMBER_OF_SETS*/);
-	}
-
-	arraytodatafilewithoutlabels(PROBE_ANALYSIS_DATA_FILENAME,
-			llcache->llc_analysis,
-			MAX_TIMES_TO_CSV, DEBUG_NR_SETS/*LL_CACHE_NUMBER_OF_SETS*/);
+//Uncomment
+//	waitforvictim_t *waitforvictim;
+//	int setidx;
+//
+//	preparellcache(&llcache, mappedsize);
+//	prepareevictconfig(&config, evictionsetsize, sameeviction,
+//			differentvirtualaddrs);
+//	preparewaitforactivity(&waitforvictim);
+//	for (setidx = 0; setidx < DEBUG_NR_SETS/*LL_CACHE_NUMBER_OF_SETS*/; ++setidx) {
+//		printf("\nWaiting for activity...\n");
+//
+//		waitforvictimactivity(waitforvictim);
+//
+//		//int setidx = 1;
+//		printf("Analyse set number: %d\n", setidx);
+//		analysellc(setidx, llcache, config,
+//		MAX_TIMES_TO_CSV * DEBUG_NR_SETS/*LL_CACHE_NUMBER_OF_SETS*/);
+//	}
+//
+//	arraytodatafilewithoutlabels(PROBE_ANALYSIS_DATA_FILENAME,
+//			llcache->llc_analysis,
+//			MAX_TIMES_TO_CSV, DEBUG_NR_SETS/*LL_CACHE_NUMBER_OF_SETS*/);
 
 	return 0;
 }
