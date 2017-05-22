@@ -18,11 +18,13 @@
 #define OUTPUTRAWDATA 1
 
 typedef struct congruentaddrs {
+	pthread_mutex_t lock;
 	int wasaccessed;
 	void *virtualaddrs[NR_OF_ADDRS];
 } congruentaddrs_t;
 
 typedef struct llcache {
+	pthread_mutex_t lock;
 	congruentaddrs_t congaddrs[LL_CACHE_NUMBER_OF_SETS];
 	void *llcachebasepointer;
 	int mappedsize;
@@ -31,12 +33,14 @@ typedef struct llcache {
 } llcache_t;
 
 typedef struct evictionconfig {
+	pthread_mutex_t lock;
 	int evictionsetsize;
 	int sameeviction;
 	int congruentvirtualaddrs;
 } evictionconfig_t;
 
 typedef struct evictiondata {
+	pthread_mutex_t lock;
 	unsigned int maxhit;
 	unsigned int maxmiss;
 	int threshold;
@@ -49,7 +53,6 @@ typedef struct evictiondata {
 } evictiondata_t;
 
 typedef struct datacsvfile {
-
 	llcache_t llcache;
 } datacsvfile_t;
 
@@ -57,6 +60,9 @@ void preparellcache(llcache_t **llcache, int mappedsize) {
 	int i;
 
 	*llcache = calloc(1, sizeof(llcache_t));
+
+	pthread_mutex_lock(&((*llcache)->lock));
+
 	(*llcache)->mappedsize = mappedsize;
 	// Map ll cache
 	(*llcache)->llcachebasepointer = mmap(0, mappedsize,
@@ -76,6 +82,8 @@ void preparellcache(llcache_t **llcache, int mappedsize) {
 	// Init congaddrs
 	memset((*llcache)->congaddrs, 0,
 	LL_CACHE_NUMBER_OF_SETS * sizeof(congruentaddrs_t));
+
+	pthread_mutex_unlock(&((*llcache)->lock));
 }
 
 void prepareevictconfig(evictionconfig_t **config, int evictionsetsize,
@@ -138,7 +146,9 @@ void getphysicalcongruentaddrs(evictionconfig_t *config, llcache_t *llcache,
 	// Search for virtual addrs with the same physical index as the source virtual addr
 	for (i = 0; count_found != virtualaddrslimit && i < llcache->mappedsize;
 			i += LL_CACHE_LINE_NUMBER_OF_BYTES) {
+		pthread_mutex_lock(&(llcache->lock));
 		virtualaddr_aux = llcache->llcachebasepointer + i;
+		pthread_mutex_unlock(&(llcache->lock));
 		physicaladdr_aux = getphysicaladdr(virtualaddr_aux, llcache->pagemap);
 		index_aux = getsetindex(physicaladdr_aux);
 
@@ -153,31 +163,45 @@ void getphysicalcongruentaddrs(evictionconfig_t *config, llcache_t *llcache,
 	llcache->congaddrs[set].wasaccessed = 1;
 }
 
-void evict(evictionconfig_t *config, void *virtualaddrs[NR_OF_ADDRS]) {
+void evict(evictionconfig_t *config, congruentaddrs_t *congaddrs) {
+
+	pthread_mutex_lock(&(congaddrs->lock));
+
 	int icounter, iaccesses, icongruentaccesses;
 	for (icounter = 0; icounter < config->evictionsetsize; ++icounter) {
 		for (iaccesses = 0; iaccesses < config->sameeviction; ++iaccesses) {
 			for (icongruentaccesses = 0;
 					icongruentaccesses < config->congruentvirtualaddrs;
 					++icongruentaccesses) {
-				accessway(virtualaddrs[icounter + icongruentaccesses]);
+				accessway(congaddrs->virtualaddrs[icounter + icongruentaccesses]);
 			}
 		}
 	}
+
+	pthread_mutex_unlock(&(congaddrs->lock));
 }
 
 void primellcache(evictionconfig_t *config, llcache_t *llcache,
 		unsigned int set) {
 
+	pthread_mutex_lock(&(llcache->lock));
+	pthread_mutex_lock(&(llcache->congaddrs[set].lock));
+
 	if (llcache->congaddrs[set].wasaccessed == 0) {
 		getphysicalcongruentaddrs(config, llcache, set, NULL);
 	}
-	congruentaddrs_t congaddrs = llcache->congaddrs[set];
-	evict(config, congaddrs.virtualaddrs);
+
+	pthread_mutex_unlock(&(llcache->lock));
+	pthread_mutex_unlock(&(llcache->congaddrs[set].lock));
+
+	evict(config, &(llcache->congaddrs[set]));
 }
 
 unsigned long probellcache(evictionconfig_t *config, llcache_t *llcache,
 		unsigned int set) {
+
+	pthread_mutex_lock(&(llcache->congaddrs[set].lock));
+
 	//Begin measuring time
 	unsigned int setcycles;
 	//TODO: change drop the start here?
@@ -196,6 +220,8 @@ unsigned long probellcache(evictionconfig_t *config, llcache_t *llcache,
 	for (i = addrcount - 1; i >= 0; --i) {
 		setcycles += timeaccessway(congaddrs.virtualaddrs[i]);
 	}
+
+	pthread_mutex_unlock(&(llcache->congaddrs[set].lock));
 
 	// Obtain operations time
 	return setcycles;
@@ -495,8 +521,8 @@ int main() {
 //	prepareevictconfig(&config, evictionsetsize, sameeviction,
 //			differentvirtualaddrs);
 	int eviction=1,diff=1,same=1;
-	for(eviction = 16;eviction < 25;eviction += 1){
-		for(same = 1;same < 60;same += 5){
+	for(eviction = 30;eviction < 50;eviction += 1){
+		//for(same = 1;same < 60;same += 5){
 			//for(diff = 2;diff < 4;diff += 2){
 				prepareevictconfig(&config, eviction, same,diff);
 				obtainevictiondata(mappedsize,eviction /*evictionsetsize*/, same /*sameeviction*/,
@@ -516,7 +542,7 @@ int main() {
 					printf("Eviction Rate: %lf\%\n", evictiondata->evictionrate);
 				}
 			//}
-		}
+		//}
 	}
 //Uncomment
 //	waitforvictim_t *waitforvictim;
