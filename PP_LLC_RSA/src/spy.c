@@ -12,19 +12,18 @@
 #define PAGEMAP_INFO_SIZE 8 /*There are 64 bits of info for each page on the pagemap*/
 #define PRIME_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/prime_static_analysis.data"
 #define PROBE_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/probe_static_analysis.data"
-#define VARIATION_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/pp_llc_hit_miss_variation_static_analysis.data"
+#define VARIATION_ANALYSIS_DATA_FILENAME "pp_llc_hit_miss_variation_static_analysis.data"
+#define VARIATION_ANALYSIS_DATA_DIRECTORY "/home/root/thesis-code/"
 #define MAX_TIMES_TO_CSV 300000
 #define MAX_TIMES_TO_OBTAIN_THRESHOLD 512*1024
 #define OUTPUTRAWDATA 1
 
 typedef struct congruentaddrs {
-	pthread_mutex_t lock;
 	int wasaccessed;
 	void *virtualaddrs[NR_OF_ADDRS];
 } congruentaddrs_t;
 
 typedef struct llcache {
-	pthread_mutex_t lock;
 	congruentaddrs_t congaddrs[LL_CACHE_NUMBER_OF_SETS];
 	void *llcachebasepointer;
 	int mappedsize;
@@ -33,14 +32,12 @@ typedef struct llcache {
 } llcache_t;
 
 typedef struct evictionconfig {
-	pthread_mutex_t lock;
 	int evictionsetsize;
 	int sameeviction;
 	int congruentvirtualaddrs;
 } evictionconfig_t;
 
 typedef struct evictiondata {
-	pthread_mutex_t lock;
 	unsigned int maxhit;
 	unsigned int maxmiss;
 	int threshold;
@@ -60,8 +57,6 @@ void preparellcache(llcache_t **llcache, int mappedsize) {
 	int i;
 
 	*llcache = calloc(1, sizeof(llcache_t));
-
-	pthread_mutex_lock(&((*llcache)->lock));
 
 	(*llcache)->mappedsize = mappedsize;
 	// Map ll cache
@@ -83,7 +78,6 @@ void preparellcache(llcache_t **llcache, int mappedsize) {
 	memset((*llcache)->congaddrs, 0,
 	LL_CACHE_NUMBER_OF_SETS * sizeof(congruentaddrs_t));
 
-	pthread_mutex_unlock(&((*llcache)->lock));
 }
 
 void prepareevictconfig(evictionconfig_t **config, int evictionsetsize,
@@ -146,15 +140,12 @@ void getphysicalcongruentaddrs(evictionconfig_t *config, llcache_t *llcache,
 	// Search for virtual addrs with the same physical index as the source virtual addr
 	for (i = 0; count_found != virtualaddrslimit && i < llcache->mappedsize;
 			i += LL_CACHE_LINE_NUMBER_OF_BYTES) {
-		pthread_mutex_lock(&(llcache->lock));
 		virtualaddr_aux = llcache->llcachebasepointer + i;
-		pthread_mutex_unlock(&(llcache->lock));
 		physicaladdr_aux = getphysicaladdr(virtualaddr_aux, llcache->pagemap);
 		index_aux = getsetindex(physicaladdr_aux);
 
 		if (set == index_aux && physicaladdr_src != physicaladdr_aux) {
-			llcache->congaddrs[set].virtualaddrs[count_found] = virtualaddr_aux;
-			count_found++;
+			llcache->congaddrs[set].virtualaddrs[count_found++] = virtualaddr_aux;
 		}
 	}
 	if (count_found != virtualaddrslimit)
@@ -164,8 +155,6 @@ void getphysicalcongruentaddrs(evictionconfig_t *config, llcache_t *llcache,
 }
 
 void evict(evictionconfig_t *config, congruentaddrs_t *congaddrs) {
-
-	pthread_mutex_lock(&(congaddrs->lock));
 
 	int icounter, iaccesses, icongruentaccesses;
 	for (icounter = 0; icounter < config->evictionsetsize; ++icounter) {
@@ -178,29 +167,20 @@ void evict(evictionconfig_t *config, congruentaddrs_t *congaddrs) {
 		}
 	}
 
-	pthread_mutex_unlock(&(congaddrs->lock));
 }
 
 void primellcache(evictionconfig_t *config, llcache_t *llcache,
 		unsigned int set) {
 
-	pthread_mutex_lock(&(llcache->lock));
-	pthread_mutex_lock(&(llcache->congaddrs[set].lock));
-
 	if (llcache->congaddrs[set].wasaccessed == 0) {
 		getphysicalcongruentaddrs(config, llcache, set, NULL);
 	}
-
-	pthread_mutex_unlock(&(llcache->lock));
-	pthread_mutex_unlock(&(llcache->congaddrs[set].lock));
 
 	evict(config, &(llcache->congaddrs[set]));
 }
 
 unsigned long probellcache(evictionconfig_t *config, llcache_t *llcache,
 		unsigned int set) {
-
-	pthread_mutex_lock(&(llcache->congaddrs[set].lock));
 
 	//Begin measuring time
 	unsigned int setcycles;
@@ -220,8 +200,6 @@ unsigned long probellcache(evictionconfig_t *config, llcache_t *llcache,
 	for (i = addrcount - 1; i >= 0; --i) {
 		setcycles += timeaccessway(congaddrs.virtualaddrs[i]);
 	}
-
-	pthread_mutex_unlock(&(llcache->congaddrs[set].lock));
 
 	// Obtain operations time
 	return setcycles;
@@ -451,7 +429,7 @@ void waitforvictimactivity(waitforvictim_t *waitforvictim) {
 			OUTPUTRAWDATA ? THRESHOLD : 2));
 }
 
-void analysehitandmissvariation(int analysissize, int evictionsetsize,
+void analysehitandmissvariation(char *filename, int analysissize, int evictionsetsize,
 		int sameeviction, int congruentvirtualaddrs, int histogramsize,
 		int histogramscale) {
 	evictiondata_t *evictiondata = calloc(1, sizeof(evictiondata_t));
@@ -485,7 +463,7 @@ void analysehitandmissvariation(int analysissize, int evictionsetsize,
 	const char *headers[headerssize];
 	headers[0] = "Hits";
 	headers[1] = "Misses";
-	biarraytocsvwithstrheaders(VARIATION_ANALYSIS_DATA_FILENAME, headers,
+	biarraytocsvwithstrheaders(filename, headers,
 			analysissize, headerssize, analysis_array);
 }
 
@@ -496,76 +474,83 @@ int main() {
 	const int histogramsize = 1000;
 	const int histogramscale = 5;
 //Uncomment
-//	const int evictionsetsize = 16;
-//	const int sameeviction = 30;
-//	const int differentvirtualaddrs = 4;
-//	const int analysissize = 30;
+	const int evictionsetsize = 20;
+	const int sameeviction = 12;
+	const int differentvirtualaddrs = 1;
+	const int analysissize = 10;
 
-//	analysehitandmissvariation(analysissize, evictionsetsize, sameeviction,
-//			differentvirtualaddrs, histogramsize, histogramscale);
-
-	evictiondata_t *evictiondata = calloc(1, sizeof(evictiondata_t));
-	int mappedsize;
-// Paper Cache-access pattern attack on disaligned AES t-tables
-// (3/4)^(4*3) = 1.367% probability LLC not being totally evicted
-	const int NUMBER_TIMES_FOR_THE_TOTAL_EVICION = 5;
-	mappedsize = (LL_CACHE_NUMBER_OF_SETS * LL_CACHE_NUMBER_OF_WAYS
-			* LL_CACHE_LINE_NUMBER_OF_BYTES)
-			* NUMBER_TIMES_FOR_THE_TOTAL_EVICION;
-
-	llcache_t *llcache;
-	evictionconfig_t *config;
-
-	preparellcache(&llcache, mappedsize);
-//Uncomment
-//	prepareevictconfig(&config, evictionsetsize, sameeviction,
-//			differentvirtualaddrs);
-	int eviction=1,diff=1,same=1;
-	for(eviction = 30;eviction < 50;eviction += 1){
-		//for(same = 1;same < 60;same += 5){
-			//for(diff = 2;diff < 4;diff += 2){
-				prepareevictconfig(&config, eviction, same,diff);
-				obtainevictiondata(mappedsize,eviction /*evictionsetsize*/, same /*sameeviction*/,
-						diff /*differentvirtualaddrs*/, /*Histogram size*/histogramsize, /*Histogram scale*/
-						histogramscale,
-						MAX_TIMES_TO_OBTAIN_THRESHOLD, evictiondata, llcache, config);
-				if (evictiondata->evictionrate > 50) {
-					printf("Eviction NR: %d. Same NR: %d. Different NR: %d.\n", eviction,same,diff);
-					if (evictiondata->maxhit >= evictiondata->maxmiss) {
-						printf("[!] Cycles of Hit >= Cycles of Miss [!]\n");
-					}
-		//Uncomment
-		//			printf("Max Hit: %u\n", evictiondata->maxhit);
-		//			printf("Max Miss: %u\n", evictiondata->maxmiss);
-		//			printf("Threshold: %u\n", evictiondata->threshold);
-		//			printf("Hits Rate: %lf\%\n", evictiondata->hitsrate);
-					printf("Eviction Rate: %lf\%\n", evictiondata->evictionrate);
-				}
-			//}
-		//}
+	int i;
+	for(i = 12; i < 53; i+=10){
+		char filename[200]="";
+		sprintf(filename, "%s%d_%d_%d_%s\0",VARIATION_ANALYSIS_DATA_DIRECTORY,evictionsetsize,i,differentvirtualaddrs,VARIATION_ANALYSIS_DATA_FILENAME);
+		analysehitandmissvariation(filename,analysissize, evictionsetsize, i,
+				differentvirtualaddrs, histogramsize, histogramscale);
 	}
-//Uncomment
-//	waitforvictim_t *waitforvictim;
-//	int setidx;
+//	evictiondata_t *evictiondata = calloc(1, sizeof(evictiondata_t));
+//	int mappedsize;
+//// Paper Cache-access pattern attack on disaligned AES t-tables
+//// (3/4)^(4*3) = 1.367% probability LLC not being totally evicted
+//	const int NUMBER_TIMES_FOR_THE_TOTAL_EVICION = 5;
+//	mappedsize = (LL_CACHE_NUMBER_OF_SETS * LL_CACHE_NUMBER_OF_WAYS
+//			* LL_CACHE_LINE_NUMBER_OF_BYTES)
+//			* NUMBER_TIMES_FOR_THE_TOTAL_EVICION;
+//
+//	llcache_t *llcache;
+//	evictionconfig_t *config;
 //
 //	preparellcache(&llcache, mappedsize);
-//	prepareevictconfig(&config, evictionsetsize, sameeviction,
-//			differentvirtualaddrs);
-//	preparewaitforactivity(&waitforvictim);
-//	for (setidx = 0; setidx < DEBUG_NR_SETS/*LL_CACHE_NUMBER_OF_SETS*/; ++setidx) {
-//		printf("\nWaiting for activity...\n");
+////Uncomment
+////	prepareevictconfig(&config, evictionsetsize, sameeviction,
+////			differentvirtualaddrs);
 //
-//		waitforvictimactivity(waitforvictim);
-//
-//		//int setidx = 1;
-//		printf("Analyse set number: %d\n", setidx);
-//		analysellc(setidx, llcache, config,
-//		MAX_TIMES_TO_CSV * DEBUG_NR_SETS/*LL_CACHE_NUMBER_OF_SETS*/);
-//	}
-//
-//	arraytodatafilewithoutlabels(PROBE_ANALYSIS_DATA_FILENAME,
-//			llcache->llc_analysis,
-//			MAX_TIMES_TO_CSV, DEBUG_NR_SETS/*LL_CACHE_NUMBER_OF_SETS*/);
+//	int eviction=23,diff=5,same=2;
+//	//for(eviction = 30;eviction < 50;eviction += 1){
+//		//for(same = 1;same < 60;same += 5){
+//			//for(diff = 2;diff < 4;diff += 2){
+//				prepareevictconfig(&config, eviction, same,diff);
+//				// Init congaddrs
+//				memset(llcache->congaddrs, 0, LL_CACHE_NUMBER_OF_SETS * sizeof(congruentaddrs_t));
+//				obtainevictiondata(mappedsize,eviction /*evictionsetsize*/, same /*sameeviction*/,
+//						diff /*differentvirtualaddrs*/, /*Histogram size*/histogramsize, /*Histogram scale*/
+//						histogramscale,
+//						MAX_TIMES_TO_OBTAIN_THRESHOLD, evictiondata, llcache, config);
+//				if (evictiondata->evictionrate > 50) {
+//					printf("Eviction NR: %d. Same NR: %d. Different NR: %d.\n", eviction,same,diff);
+//					if (evictiondata->maxhit >= evictiondata->maxmiss) {
+//						printf("[!] Cycles of Hit >= Cycles of Miss [!]\n");
+//					}
+//		//Uncomment
+//		//			printf("Max Hit: %u\n", evictiondata->maxhit);
+//		//			printf("Max Miss: %u\n", evictiondata->maxmiss);
+//		//			printf("Threshold: %u\n", evictiondata->threshold);
+//		//			printf("Hits Rate: %lf\%\n", evictiondata->hitsrate);
+//					printf("Eviction Rate: %lf\%\n", evictiondata->evictionrate);
+//				}
+//			//}
+//		//}
+//	//}
+////Uncomment
+////	waitforvictim_t *waitforvictim;
+////	int setidx;
+////
+////	preparellcache(&llcache, mappedsize);
+////	prepareevictconfig(&config, evictionsetsize, sameeviction,
+////			differentvirtualaddrs);
+////	preparewaitforactivity(&waitforvictim);
+////	for (setidx = 0; setidx < DEBUG_NR_SETS/*LL_CACHE_NUMBER_OF_SETS*/; ++setidx) {
+////		printf("\nWaiting for activity...\n");
+////
+////		waitforvictimactivity(waitforvictim);
+////
+////		//int setidx = 1;
+////		printf("Analyse set number: %d\n", setidx);
+////		analysellc(setidx, llcache, config,
+////		MAX_TIMES_TO_CSV * DEBUG_NR_SETS/*LL_CACHE_NUMBER_OF_SETS*/);
+////	}
+////
+////	arraytodatafilewithoutlabels(PROBE_ANALYSIS_DATA_FILENAME,
+////			llcache->llc_analysis,
+////			MAX_TIMES_TO_CSV, DEBUG_NR_SETS/*LL_CACHE_NUMBER_OF_SETS*/);
 
 	return 0;
 }
