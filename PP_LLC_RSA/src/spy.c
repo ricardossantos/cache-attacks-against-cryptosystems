@@ -80,6 +80,17 @@ void preparellcache(llcache_t **llcache, int mappedsize) {
 
 }
 
+void disposel1cache(llcache_t *llcache){
+	if (llcache->llcachebasepointer != NULL) {
+		munmap(llcache->llcachebasepointer, llcache->mappedsize);
+	}
+
+	llcache->mappedsize = 0;
+	llcache->llcachebasepointer = NULL;
+
+	free(llcache);
+}
+
 void prepareevictconfig(evictionconfig_t **config, int evictionsetsize,
 		int sameeviction, int congruentvirtualaddrs) {
 	*config = calloc(1, sizeof(evictionconfig_t));
@@ -154,36 +165,37 @@ void getphysicalcongruentaddrs(evictionconfig_t *config, llcache_t *llcache,
 	llcache->congaddrs[set].wasaccessed = 1;
 }
 
-void evict(evictionconfig_t *config, congruentaddrs_t *congaddrs) {
+unsigned int evict(evictionconfig_t *config, congruentaddrs_t *congaddrs) {
 
 	int icounter, iaccesses, icongruentaccesses;
+	unsigned int setcycles=0;
 	for (icounter = 0; icounter < config->evictionsetsize; ++icounter) {
 		for (iaccesses = 0; iaccesses < config->sameeviction; ++iaccesses) {
 			for (icongruentaccesses = 0;
 					icongruentaccesses < config->congruentvirtualaddrs;
 					++icongruentaccesses) {
-				accessway(congaddrs->virtualaddrs[icounter + icongruentaccesses]);
+				setcycles += timeaccessway(congaddrs->virtualaddrs[icounter + icongruentaccesses]);
 			}
 		}
 	}
-
+	return setcycles;
 }
 
-void primellcache(evictionconfig_t *config, llcache_t *llcache,
+unsigned int primellcache(evictionconfig_t *config, llcache_t *llcache,
 		unsigned int set) {
 
 	if (llcache->congaddrs[set].wasaccessed == 0) {
 		getphysicalcongruentaddrs(config, llcache, set, NULL);
 	}
 
-	evict(config, &(llcache->congaddrs[set]));
+	return evict(config, &(llcache->congaddrs[set]));
 }
 
-unsigned long probellcache(evictionconfig_t *config, llcache_t *llcache,
+unsigned int probellcache(evictionconfig_t *config, llcache_t *llcache,
 		unsigned int set) {
 
 	//Begin measuring time
-	unsigned int setcycles;
+	unsigned int setcycles=0;
 	//TODO: change drop the start here?
 
 	int i, addrcount = config->evictionsetsize + config->congruentvirtualaddrs
@@ -349,6 +361,9 @@ void obtainevictiondata(int mappedsize, int evictionsetsize, int sameeviction,
 	evictiondata->countcorrectmisses = countcorrectmisses;
 	evictiondata->evictionrate = (countcorrectmisses / allmisses) * 100;
 	evictiondata->hitsrate = (countcorrecthits / allhits) * 100;
+
+	//Dispose array mmap
+	munmap(array, PAGES_SIZE);
 }
 
 void analysellc(int set, llcache_t *llcache, evictionconfig_t *config,
@@ -429,6 +444,125 @@ void waitforvictimactivity(waitforvictim_t *waitforvictim) {
 			OUTPUTRAWDATA ? THRESHOLD : 2));
 }
 
+void graphprimes(int mappedsize, int evictionsetsize, int sameeviction,
+		int congruentvirtualaddrs, int histogramsize, int histogramscale,
+		int maxruns, evictiondata_t *evictiondata, llcache_t *llcache,
+		evictionconfig_t *config) {
+	int fdallh, fdallm;
+	unsigned int hits, misses;
+
+	// Config Performance Counters
+	fdallh = get_fd_perf_counter(PERF_TYPE_HARDWARE,
+			PERF_COUNT_HW_CACHE_REFERENCES);
+	fdallm = get_fd_perf_counter(PERF_TYPE_HARDWARE,
+			PERF_COUNT_HW_CACHE_MISSES);
+
+	// Preparing histograms
+	const int MID_ARRAY = PAGES_SIZE / 2;
+	unsigned int *hit_counts;
+	hit_counts = calloc(histogramsize, sizeof(unsigned int));
+	unsigned int *miss_counts;
+	miss_counts = calloc(histogramsize, sizeof(unsigned int));
+
+	int i;
+	void *array, *physicaladdr;
+
+	array = mmap(0, PAGES_SIZE, PROT_READ | PROT_WRITE,
+	MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (array == MAP_FAILED)
+		handle_error("mmap");
+
+	physicaladdr = getphysicaladdr(array + MID_ARRAY, llcache->pagemap);
+	unsigned int set = getsetindex(physicaladdr);
+
+	// Preparing for the hit histogram
+	accessway(array + MID_ARRAY);
+
+	// Start Hits Performance Counters
+//	start_perf_counter(fdallh);
+//	start_perf_counter(fdallm);
+
+	// Primes-Probes histogram / Hit histogram
+	unsigned int probetime;
+	for (i = 0; i < maxruns; ++i) {
+		primellcache(config, llcache, set);
+		probetime = probellcache(config, llcache, set)
+				/ histogramscale;
+		hit_counts[
+				probetime > (histogramsize - 1) ? histogramsize - 1 : probetime]++;
+		sched_yield();
+	}
+
+	// Preparing for the miss histogram
+	flush(array + MID_ARRAY);
+
+	// Primes histogram / Miss histogram
+	unsigned int primetime;
+	for (i = 0; i < maxruns; ++i) {
+		primetime = primellcache(config, llcache, set);
+
+		miss_counts[
+					primetime > (histogramsize - 1) ? histogramsize - 1 : primetime]++;
+		sched_yield();
+	}
+
+	// Obtain eviciton data
+	unsigned int hitmax = 0;
+	unsigned int missmax = 0;
+	unsigned int hitmaxindex = 0;
+	unsigned int missmaxindex = 0;
+	unsigned int missminindex = 0;
+//	printf("TSC:           HITS           MISSES\n");
+	for (i = 0; i < histogramsize; ++i) {
+//		printf("%3d: %10zu %10zu\n", i * histogramscale, hit_counts[i],
+//				miss_counts[i]);
+		if (hitmax < hit_counts[i]) {
+			hitmax = hit_counts[i];
+			hitmaxindex = i;
+		}
+		if (missmax < miss_counts[i]) {
+			missmax = miss_counts[i];
+			missmaxindex = i;
+		}
+		if (miss_counts[i] > 3 && missminindex == 0)
+			missminindex = i;
+	}
+
+	double countcorrectmisses = 0, allmisses = 0, countcorrecthits = 0,
+			allhits = 0;
+
+	evictiondata->maxhit = hitmaxindex * histogramscale;
+	evictiondata->maxmiss = missmaxindex * histogramscale;
+	evictiondata->threshold = evictiondata->maxmiss
+			- (evictiondata->maxmiss - evictiondata->maxhit) / 2;
+
+	for (i = 0; i < histogramsize; ++i) {
+		if (miss_counts[i] > 0
+				&& (i * histogramscale) > evictiondata->threshold) {
+			++countcorrectmisses;
+		}
+		if (miss_counts[i] > 0) {
+			++allmisses;
+		}
+		if (hit_counts[i] > 0
+				&& (i * histogramscale) < evictiondata->threshold) {
+			++countcorrecthits;
+		}
+		if (hit_counts[i] > 0) {
+			++allhits;
+		}
+	}
+	evictiondata->allhits = allhits;
+	evictiondata->allmisses = allmisses;
+	evictiondata->countcorrecthits = countcorrecthits;
+	evictiondata->countcorrectmisses = countcorrectmisses;
+	evictiondata->evictionrate = (countcorrectmisses / allmisses) * 100;
+	evictiondata->hitsrate = (countcorrecthits / allhits) * 100;
+
+	//Dispose array mmap
+	munmap(array, PAGES_SIZE);
+}
+
 void analysehitandmissvariation(char *filename, int analysissize, int evictionsetsize,
 		int sameeviction, int congruentvirtualaddrs, int histogramsize,
 		int histogramscale) {
@@ -453,6 +587,11 @@ void analysehitandmissvariation(char *filename, int analysissize, int evictionse
 			congruentvirtualaddrs);
 
 	for (i = 0; i < analysissize; ++i) {
+//Test sucessive Prime VS Prime+Probe
+//		graphprimes(mappedsize, evictionsetsize, sameeviction,
+//						congruentvirtualaddrs, /*Histogram size*/histogramsize, /*Histogram scale*/
+//						histogramscale,
+//						MAX_TIMES_TO_OBTAIN_THRESHOLD, evictiondata, llcache, config);
 		obtainevictiondata(mappedsize, evictionsetsize, sameeviction,
 				congruentvirtualaddrs, /*Histogram size*/histogramsize, /*Histogram scale*/
 				histogramscale,
@@ -465,25 +604,26 @@ void analysehitandmissvariation(char *filename, int analysissize, int evictionse
 	headers[1] = "Misses";
 	biarraytocsvwithstrheaders(filename, headers,
 			analysissize, headerssize, analysis_array);
+	disposel1cache(llcache);
 }
 
 int main() {
 
 	setcoreaffinity(0);
 
-	const int histogramsize = 1000;
+	const int histogramsize = 10000;
 	const int histogramscale = 5;
 //Uncomment
 	const int evictionsetsize = 20;
-	const int sameeviction = 12;
+	const int sameeviction = 1;
 	const int differentvirtualaddrs = 1;
 	const int analysissize = 10;
 
 	int i;
-	for(i = 12; i < 53; i+=10){
+	for(i = 48; i < 65; i+=16){
 		char filename[200]="";
-		sprintf(filename, "%s%d_%d_%d_%s\0",VARIATION_ANALYSIS_DATA_DIRECTORY,evictionsetsize,i,differentvirtualaddrs,VARIATION_ANALYSIS_DATA_FILENAME);
-		analysehitandmissvariation(filename,analysissize, evictionsetsize, i,
+		sprintf(filename, "%s%d_%d_%d_%s\0",VARIATION_ANALYSIS_DATA_DIRECTORY,i,sameeviction,differentvirtualaddrs,VARIATION_ANALYSIS_DATA_FILENAME);
+		analysehitandmissvariation(filename,analysissize, i, sameeviction,
 				differentvirtualaddrs, histogramsize, histogramscale);
 	}
 //	evictiondata_t *evictiondata = calloc(1, sizeof(evictiondata_t));

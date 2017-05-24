@@ -32,82 +32,8 @@
 
 #define RANDOMIZESETPTRS 0
 
-#define PRIME_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/prime_static_analysis.data"
-#define PROBE_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/probe_static_analysis.data"
-
-/* [+] BEGIN [+] Least Recently Used Replacement Policy <- No need to this type of attack */
-
-//void preparel1cache(void * basepointer) {
-//	int set, way;
-//
-//	for (set = 0; set < L1D_CACHE_NUMBER_OF_SETS; ++set) {
-//		for (way = 0; way < L1D_CACHE_NUMBER_OF_WAYS - 1; way++) {
-//			// (set,way)->nextline = &(set,way+1)
-//			(*(void **) (BASE_CACHE_LINE_PTR(basepointer, set, way))) =
-//					BASE_CACHE_LINE_PTR(basepointer, set, way + 1);
-//			// (set,way+1)->previousline = &(set,way)
-//			(*(void **) (PREVIOUS_CACHE_LINE_PTR(basepointer, set, way + 1))) =
-//					PREVIOUS_CACHE_LINE_PTR(basepointer, set, way);
-//		}
-//		// (set,L1D_CACHE_NUMBER_OF_WAYS-1)->nextline = &(set+1,0);
-//		(*(void **) (BASE_CACHE_LINE_PTR(basepointer, set, L1D_CACHE_NUMBER_OF_WAYS-1))) =
-//							BASE_CACHE_LINE_PTR(basepointer, set+1, 0);
-//		// (set,0)->previousline = &(set+1,L1D_CACHE_NUMBER_OF_WAYS-1);
-//		(*(void **) (PREVIOUS_CACHE_LINE_PTR(basepointer, set, 0))) =
-//				PREVIOUS_CACHE_LINE_PTR(basepointer, set+1, L1D_CACHE_NUMBER_OF_WAYS-1);
-//	}
-//	// (L1D_CACHE_NUMBER_OF_SETS-1,L1D_CACHE_NUMBER_OF_WAYS-1)->nextline = &(0,0)
-//	(*(void **) (BASE_CACHE_LINE_PTR(basepointer, L1D_CACHE_NUMBER_OF_SETS-1,
-//			L1D_CACHE_NUMBER_OF_WAYS-1))) = BASE_CACHE_LINE_PTR(basepointer, 0,
-//			0);
-//	// (L1D_CACHE_NUMBER_OF_SETS-1,0)->previousline = &(0,L1D_CACHE_NUMBER_OF_WAYS-1)
-//	(*(void **) (PREVIOUS_CACHE_LINE_PTR(basepointer,
-//			L1D_CACHE_NUMBER_OF_SETS-1, 0))) = PREVIOUS_CACHE_LINE_PTR(
-//			basepointer, 0, L1D_CACHE_NUMBER_OF_WAYS-1);
-//	if (RANDOMIZESETPTRS) {
-//		//TODO: really necessary?
-//	}
-//}
-//
-//void analysel1dcache(unsigned short int *out_analysis, void * l1dbaseptr) {
-//	int set, way;
-//	for (set = 0; set < L1D_CACHE_NUMBER_OF_SETS; ++set) {
-//		way = L1D_CACHE_NUMBER_OF_WAYS;
-////		printf("--------------------------\n");
-////		printf("SET 64B*6Ways: %x\n",l1dbaseptr);
-//
-//		//*out_analysis = reloadset(l1dbaseptr, );
-//		unsigned long long start = getcurrenttsc();
-//		while(way--){
-////			printf("WAY 64B: %x\n",l1dbaseptr);
-//			accessway(l1dbaseptr);
-//			//Transverse the pointer here
-//			l1dbaseptr = (* (void **)l1dbaseptr);
-//		}
-//		unsigned short int aux = getcurrenttsc()-start;
-//		if(out_analysis != NULL){
-//			*out_analysis = aux < USHRT_MAX? aux : USHRT_MAX;
-//
-////		printf("AFTER RELOAD SET 64B*6Ways: %X\n",l1dbaseptr);
-////		printf("Analysed UINT: %X\n",out_analysis);
-////		printf("--------------------------\n");
-//			out_analysis++;
-//		}
-//	}
-//}
-//
-//void flushl1dcache(void * l1dbaseptr) {
-//	int set, way;
-//	for (set = 0; set < L1D_CACHE_NUMBER_OF_SETS; ++set) {
-//		way = L1D_CACHE_NUMBER_OF_WAYS;
-//		while(way--){
-//			flush(l1dbaseptr);
-//			//Transverse the pointer here
-//			l1dbaseptr = (* (void **)l1dbaseptr);
-//		}
-//	}
-//}
-/* [+] END [+] Least Recently Used Replacement Policy <- No need to this type of attack */
+#define PRIME_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/l1d_prime_static_analysis.data"
+#define PROBE_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/l1d_probe_static_analysis.data"
 
 /* [+] BEGIN [+] Random Replacement Policy */
 
