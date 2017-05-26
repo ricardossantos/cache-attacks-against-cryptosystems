@@ -15,7 +15,7 @@
 #define MAX_TIMES_TO_CSV 300000
 #define BASE_CACHE_LINE_PTR(baseptr,set,way) (void *)(((unsigned int)baseptr) + ((set) * LL_CACHE_LINE_NUMBER_OF_BYTES) + ((way) * LL_CACHE_SIZE_OF_WAY))
 #define PREVIOUS_CACHE_LINE_PTR(baseptr,set,way) (void *)(((unsigned int)baseptr) + ((set) * LL_CACHE_LINE_NUMBER_OF_BYTES) + ((way) * LL_CACHE_SIZE_OF_WAY) + (sizeof(void *)))
-#define RANDOMIZESETPTRS 0
+#define RANDOMIZESETPTRS 1
 #define PRIME_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/prime_static_analysis.data"
 #define PROBE_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/probe_static_analysis.data"
 #define MAX_TIMES_TO_OBTAIN_THRESHOLD 512*1024
@@ -68,12 +68,20 @@ unsigned int getsetindex(void *physicaladdr) {
 
 typedef struct llcache {
 	void *basepointer;
-	void *lastpointer;
 	int mappedsize;
 	int pagemap;
+	unsigned short randomized[LL_CACHE_NUMBER_OF_SETS];
+	int randomizedsets;
 	unsigned short int analysis[MAX_TIMES_TO_CSV * LL_CACHE_NUMBER_OF_SETS];
 } llcache_t;
-
+/*
+ void * testset2 = BASE_CACHE_LINE_PTR((*llcache)->basepointer, set, way);
+ void *physicaladdr2 = getphysicaladdr(testset2 , (*llcache)->pagemap);
+ unsigned int set2 = getsetindex(physicaladdr2);
+ void * testset3 = BASE_CACHE_LINE_PTR((*llcache)->basepointer, set, way+1);
+ void *physicaladdr3 = getphysicaladdr(testset3 , (*llcache)->pagemap);
+ unsigned int set3 = getsetindex(physicaladdr3);
+ printf("SET2: %d | SET3: %d | WAY: %d\n",set2,set3,way);*/
 typedef struct evictiondata {
 	unsigned int maxhit;
 	unsigned int maxmiss;
@@ -92,6 +100,9 @@ void preparellcache(llcache_t **llcache, int mappedsize) {
 
 	*llcache = calloc(1, sizeof(llcache_t));
 
+	// Get file pointer for /proc/<pid>/pagemap
+	(*llcache)->pagemap = open("/proc/self/pagemap", O_RDONLY);
+
 	// Map ll cache
 	(*llcache)->basepointer = mmap(0, mappedsize,
 	PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -99,10 +110,6 @@ void preparellcache(llcache_t **llcache, int mappedsize) {
 		handle_error("mmap");
 
 	(*llcache)->mappedsize = mappedsize;
-	(*llcache)->lastpointer = NULL;
-
-	// Get file pointer for /proc/<pid>/pagemap
-	(*llcache)->pagemap = open("/proc/self/pagemap", O_RDONLY);
 
 	// Prepare mapping/linked list
 	for (set = 0; set < LL_CACHE_NUMBER_OF_SETS; ++set) {
@@ -115,27 +122,63 @@ void preparellcache(llcache_t **llcache, int mappedsize) {
 					way + 1))) = PREVIOUS_CACHE_LINE_PTR(
 					(*llcache)->basepointer, set, way);
 		}
-		// (set,LL_CACHE_NUMBER_OF_WAYS-1)->nextline = &(set+1,0);
-		(*(void **) (BASE_CACHE_LINE_PTR((*llcache)->basepointer, set,
-				LL_CACHE_NUMBER_OF_WAYS-1))) = BASE_CACHE_LINE_PTR(
-				(*llcache)->basepointer, set + 1, 0);
-		// (set,0)->previousline = &(set+1,LL_CACHE_NUMBER_OF_WAYS-1);
-		(*(void **) (PREVIOUS_CACHE_LINE_PTR((*llcache)->basepointer, set, 0))) =
-				PREVIOUS_CACHE_LINE_PTR((*llcache)->basepointer, set + 1,
-						LL_CACHE_NUMBER_OF_WAYS-1);
+		if (!RANDOMIZESETPTRS && set < LL_CACHE_NUMBER_OF_SETS - 1) {
+			// (set,LL_CACHE_NUMBER_OF_WAYS-1)->nextline = &(set+1,0);
+			(*(void **) (BASE_CACHE_LINE_PTR((*llcache)->basepointer, set,
+					LL_CACHE_NUMBER_OF_WAYS-1))) = BASE_CACHE_LINE_PTR(
+					(*llcache)->basepointer, set + 1, 0);
+			// (set,0)->previousline = &(set+1,LL_CACHE_NUMBER_OF_WAYS-1);
+			(*(void **) (PREVIOUS_CACHE_LINE_PTR((*llcache)->basepointer, set,
+					0))) = PREVIOUS_CACHE_LINE_PTR((*llcache)->basepointer,
+					set + 1, LL_CACHE_NUMBER_OF_WAYS-1);
+		}
 	}
-	// (LL_CACHE_NUMBER_OF_SETS-1,LL_CACHE_NUMBER_OF_WAYS-1)->nextline = &(0,0)
-	(*(void **) (BASE_CACHE_LINE_PTR((*llcache)->basepointer,
-			LL_CACHE_NUMBER_OF_SETS-1, LL_CACHE_NUMBER_OF_WAYS-1))) =
-			BASE_CACHE_LINE_PTR((*llcache)->basepointer, 0, 0);
-	// (LL_CACHE_NUMBER_OF_SETS-1,0)->previousline = &(0,LL_CACHE_NUMBER_OF_WAYS-1)
-	(*(void **) (PREVIOUS_CACHE_LINE_PTR((*llcache)->basepointer,
-			LL_CACHE_NUMBER_OF_SETS-1, 0))) = PREVIOUS_CACHE_LINE_PTR(
-			(*llcache)->basepointer, 0, LL_CACHE_NUMBER_OF_WAYS-1);
-
-	//Init mapping/linked list
+	if (!RANDOMIZESETPTRS) {
+		// (LL_CACHE_NUMBER_OF_SETS-1,LL_CACHE_NUMBER_OF_WAYS-1)->nextline = &(0,0)
+		(*(void **) (BASE_CACHE_LINE_PTR((*llcache)->basepointer,
+				LL_CACHE_NUMBER_OF_SETS-1, LL_CACHE_NUMBER_OF_WAYS-1))) =
+				BASE_CACHE_LINE_PTR((*llcache)->basepointer, 0, 0);
+		// (LL_CACHE_NUMBER_OF_SETS-1,0)->previousline = &(0,LL_CACHE_NUMBER_OF_WAYS-1)
+		(*(void **) (PREVIOUS_CACHE_LINE_PTR((*llcache)->basepointer,
+				LL_CACHE_NUMBER_OF_SETS-1, 0))) = PREVIOUS_CACHE_LINE_PTR(
+				(*llcache)->basepointer, 0, LL_CACHE_NUMBER_OF_WAYS-1);
+	}
 	if (RANDOMIZESETPTRS) {
-		//TODO: really necessary?
+		//Init randomization auxiliar list
+		for (set = 0; set < LL_CACHE_NUMBER_OF_SETS; ++set) {
+			(*llcache)->randomized[set] = set;
+		}
+		(*llcache)->randomizedsets = LL_CACHE_NUMBER_OF_SETS;
+		//Perform randomization
+		for (set = 0; set < (*llcache)->randomizedsets; ++set) {
+			int randset = random() % ((*llcache)->randomizedsets - set) + set;
+			unsigned short aux = (*llcache)->randomized[randset];
+			(*llcache)->randomized[randset] = (*llcache)->randomized[set];
+			(*llcache)->randomized[set] = aux;
+		}
+		//Build list randomized dependencies
+		for (set = 0; set < (*llcache)->randomizedsets - 1; ++set) {
+			// (set,LL_CACHE_NUMBER_OF_WAYS-1)->nextline = &(set+1,0);
+			(*(void **) (BASE_CACHE_LINE_PTR((*llcache)->basepointer,
+					(*llcache)->randomized[set], LL_CACHE_NUMBER_OF_WAYS-1))) =
+					BASE_CACHE_LINE_PTR((*llcache)->basepointer,
+							(*llcache)->randomized[set + 1], 0);
+			// (set,0)->previousline = &(set+1,LL_CACHE_NUMBER_OF_WAYS-1);
+			(*(void **) (PREVIOUS_CACHE_LINE_PTR((*llcache)->basepointer,
+					(*llcache)->randomized[set], 0))) = PREVIOUS_CACHE_LINE_PTR(
+					(*llcache)->basepointer, (*llcache)->randomized[set + 1],
+					LL_CACHE_NUMBER_OF_WAYS-1);
+		}
+		// (LL_CACHE_NUMBER_OF_SETS-1,LL_CACHE_NUMBER_OF_WAYS-1)->nextline = &(0,0)
+		(*(void **) (BASE_CACHE_LINE_PTR((*llcache)->basepointer,
+				(*llcache)->randomized[LL_CACHE_NUMBER_OF_SETS-1],
+				LL_CACHE_NUMBER_OF_WAYS-1))) = BASE_CACHE_LINE_PTR(
+				(*llcache)->basepointer, (*llcache)->randomized[0], 0);
+		// (LL_CACHE_NUMBER_OF_SETS-1,0)->previousline = &(0,LL_CACHE_NUMBER_OF_WAYS-1)
+		(*(void **) (PREVIOUS_CACHE_LINE_PTR((*llcache)->basepointer,
+				(*llcache)->randomized[LL_CACHE_NUMBER_OF_SETS-1], 0))) =
+				PREVIOUS_CACHE_LINE_PTR((*llcache)->basepointer,
+						(*llcache)->randomized[0], LL_CACHE_NUMBER_OF_WAYS-1);
 	}
 }
 
@@ -154,27 +197,24 @@ unsigned int prime(llcache_t *cache, int set) {
 	int way = LL_CACHE_NUMBER_OF_WAYS;
 	unsigned int setcycles = 0;
 	void *setpointer = BASE_CACHE_LINE_PTR(cache->basepointer, set, 0);
-	void *physicaladdr;
 	while (way--) {
-		physicaladdr = getphysicaladdr(setpointer, cache->pagemap);
-		unsigned int set2 = getsetindex(physicaladdr);
-		if(set == set2){
-			printf("PRIMEWAY 64B: %x\n",setpointer);
-			setcycles += timeaccessway(setpointer);
-			//Transverse the pointer here
-			setpointer = (*(void **) setpointer);
-		}
+		//printf("PRIMEWAY 64B: %x\n", setpointer);
+		setcycles += timeaccessway(setpointer);
+		printf("PRIME POINTER: %x\n",setpointer);
+		//Transverse the pointer here
+		setpointer = (*(void **) setpointer);
 	}
 	return setcycles;
 }
 
-unsigned int probe(llcache_t *llcache, int set) {
+unsigned int probe(llcache_t *cache, int set) {
 	int way = LL_CACHE_NUMBER_OF_WAYS;
 	unsigned int setcycles = 0;
-	void *setpointer = PREVIOUS_CACHE_LINE_PTR(llcache->basepointer, set,0);
+	void *setpointer = PREVIOUS_CACHE_LINE_PTR(cache->basepointer, set, 0);
 	while (way--) {
-		printf("PROBEWAY 64B: %x\n",setpointer);
+		//printf("PROBEWAY 64B: %x\n", setpointer);
 		setcycles += timeaccessway(setpointer);
+		printf("PROBE POINTER: %x\n",setpointer);
 		//Transverse the pointer here
 		setpointer = (*(void **) setpointer);
 	}
@@ -231,9 +271,35 @@ void obtainevictiondata(int histogramsize, int histogramscale, int maxruns,
 	physicaladdr = getphysicaladdr(array + MID_ARRAY, cache->pagemap);
 	unsigned int set = getsetindex(physicaladdr);
 
+	//TODO: REMOVE
+	unsigned int set1, set2, way;
+	void *ptr = BASE_CACHE_LINE_PTR(cache->basepointer, 0, 0);
+	for (way = 0; way < LL_CACHE_NUMBER_OF_WAYS-1 ; ++way) {
+		for (set1 = 0; set1 < LL_CACHE_NUMBER_OF_SETS-1; ++set1) {
+			physicaladdr = getphysicaladdr(ptr, cache->pagemap);
+			set2 = getsetindex(physicaladdr);
+//			printf(
+//					"CYCLE SET1: %d & WAY: %d || SET FROM VA: %d || PTR: %x || PHYSICAL ADDR: %x \n",
+//					set1, way, set2, ptr, physicaladdr);
+			if (set == set2){
+				break;
+			}
+			ptr = (*(void **) ptr);
+			/*PASSAR ESTES RESULTADOS PARA UM FICHEIRO*/
+			/*ESTÁ A ANDAR DE 64 em 64 :O*/
+		}
+		if (set == set2){
+//			printf("FOUND A MATCH!!\nCYCLE SET1: %d & WAY: %d \n",
+//								set1, way);
+			break;
+		}
+	}
+	//TODO: REMOVE
+
 	// Preparing for the hit histogram
 	accessway(array + MID_ARRAY);
 
+	set=set1;
 	// Hit histogram
 	for (i = 0; i < maxruns; ++i) {
 		prime(cache, set);
@@ -250,7 +316,7 @@ void obtainevictiondata(int histogramsize, int histogramscale, int maxruns,
 	for (i = 0; i < maxruns; ++i) {
 		prime(cache, set);
 
-		accessway(array + MID_ARRAY);
+		acessway(array + MID_ARRAY);
 
 		unsigned int probetime = probe(cache, set) / histogramscale;
 		miss_counts[
@@ -362,7 +428,7 @@ int main() {
 
 	char filename[200] = "";
 	sprintf(filename, "%s%s", VARIATION_ANALYSIS_DATA_DIRECTORY,
-			VARIATION_ANALYSIS_DATA_FILENAME);
+	VARIATION_ANALYSIS_DATA_FILENAME);
 
 	analysehitandmissvariation(mappedsize, filename, analysissize,
 			histogramsize, histogramscale);
