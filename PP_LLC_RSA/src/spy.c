@@ -444,20 +444,6 @@ void waitforvictimactivity(waitforvictim_t *waitforvictim) {
 			OUTPUTRAWDATA ? THRESHOLD : 2));
 }
 
-void waitforvictimactivitytoend(waitforvictim_t *waitforvictim) {
-
-	unsigned long ptr_offset = (unsigned long) waitforvictim->mapping_addr;
-
-	unsigned int aux = 0;
-	do {
-		waitforvictim->analysis_array[0][0] = reload(waitforvictim->exe_addrs[0] + ptr_offset);
-		waitforvictim->analysis_array[0][1] = reload(waitforvictim->exe_addrs[1] + ptr_offset);
-		waitforvictim->analysis_array[0][2] = reload(waitforvictim->exe_addrs[2] + ptr_offset);
-	} while (isvictimactive(waitforvictim->analysis_array[0],
-			waitforvictim->nr_addrs,
-			OUTPUTRAWDATA ? THRESHOLD : 2));
-}
-
 void graphprimes(int mappedsize, int evictionsetsize, int sameeviction,
 		int congruentvirtualaddrs, int histogramsize, int histogramscale,
 		int maxruns, evictiondata_t *evictiondata, llcache_t *llcache,
@@ -640,18 +626,6 @@ int main() {
 //		analysehitandmissvariation(filename,analysissize, 16, 8,
 //				1, histogramsize, histogramscale);
 
-	unsigned int values=0;
-	for(i = 0; i< 100; ++i){
-		waitforvictim_t *waitforvictim, *waitforvictimtoend;
-		preparewaitforactivity(&waitforvictim);
-		preparewaitforactivity(&waitforvictimtoend);
-		printf("WAITING RSA ACTIVITY...\n");
-		waitforvictimactivity(waitforvictim);
-		unsigned long long rsastarted = getcurrenttsc();
-		waitforvictimactivitytoend(waitforvictimtoend);
-		values +=getcurrenttsc()-rsastarted;
-	}
-	printf("NUMBER OF CYCLES OF RSA ACTIVITY: %d\n",values/100);
 //	}
 //	evictiondata_t *evictiondata = calloc(1, sizeof(evictiondata_t));
 //	int mappedsize;

