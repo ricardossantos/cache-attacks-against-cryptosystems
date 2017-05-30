@@ -68,7 +68,7 @@ void preparellcache(llcache_t **llcache, int mappedsize) {
 	// Get file pointer for /proc/<pid>/pagemap
 	(*llcache)->pagemap = open("/proc/self/pagemap", O_RDONLY);
 
-	// Init mapping so that pages are not empty
+	// Init mapping
 	for (i = 0; i < mappedsize; i += PAGES_SIZE) {
 		unsigned long long *aux = ((void *) (*llcache)->llcachebasepointer) + i;
 		aux[0] = i;
@@ -80,7 +80,7 @@ void preparellcache(llcache_t **llcache, int mappedsize) {
 
 }
 
-void disposel1cache(llcache_t *llcache){
+void disposel1cache(llcache_t *llcache) {
 	if (llcache->llcachebasepointer != NULL) {
 		munmap(llcache->llcachebasepointer, llcache->mappedsize);
 	}
@@ -156,7 +156,8 @@ void getphysicalcongruentaddrs(evictionconfig_t *config, llcache_t *llcache,
 		index_aux = getsetindex(physicaladdr_aux);
 
 		if (set == index_aux && physicaladdr_src != physicaladdr_aux) {
-			llcache->congaddrs[set].virtualaddrs[count_found++] = virtualaddr_aux;
+			llcache->congaddrs[set].virtualaddrs[count_found++] =
+					virtualaddr_aux;
 		}
 	}
 	if (count_found != virtualaddrslimit)
@@ -168,13 +169,14 @@ void getphysicalcongruentaddrs(evictionconfig_t *config, llcache_t *llcache,
 unsigned int evict(evictionconfig_t *config, congruentaddrs_t *congaddrs) {
 
 	int icounter, iaccesses, icongruentaccesses;
-	unsigned int setcycles=0;
+	unsigned int setcycles = 0;
 	for (icounter = 0; icounter < config->evictionsetsize; ++icounter) {
 		for (iaccesses = 0; iaccesses < config->sameeviction; ++iaccesses) {
 			for (icongruentaccesses = 0;
 					icongruentaccesses < config->congruentvirtualaddrs;
 					++icongruentaccesses) {
-				setcycles += timeaccessway(congaddrs->virtualaddrs[icounter + icongruentaccesses]);
+				setcycles += timeaccessway(
+						congaddrs->virtualaddrs[icounter + icongruentaccesses]);
 			}
 		}
 	}
@@ -195,7 +197,7 @@ unsigned int probellcache(evictionconfig_t *config, llcache_t *llcache,
 		unsigned int set) {
 
 	//Begin measuring time
-	unsigned int setcycles=0;
+	unsigned int setcycles = 0;
 	//TODO: change drop the start here?
 
 	int i, addrcount = config->evictionsetsize + config->congruentvirtualaddrs
@@ -486,8 +488,7 @@ void graphprimes(int mappedsize, int evictionsetsize, int sameeviction,
 	unsigned int probetime;
 	for (i = 0; i < maxruns; ++i) {
 		primellcache(config, llcache, set);
-		probetime = probellcache(config, llcache, set)
-				/ histogramscale;
+		probetime = probellcache(config, llcache, set) / histogramscale;
 		hit_counts[
 				probetime > (histogramsize - 1) ? histogramsize - 1 : probetime]++;
 		sched_yield();
@@ -502,7 +503,7 @@ void graphprimes(int mappedsize, int evictionsetsize, int sameeviction,
 		primetime = primellcache(config, llcache, set);
 
 		miss_counts[
-					primetime > (histogramsize - 1) ? histogramsize - 1 : primetime]++;
+				primetime > (histogramsize - 1) ? histogramsize - 1 : primetime]++;
 		sched_yield();
 	}
 
@@ -563,9 +564,9 @@ void graphprimes(int mappedsize, int evictionsetsize, int sameeviction,
 	munmap(array, PAGES_SIZE);
 }
 
-void analysehitandmissvariation(char *filename, int analysissize, int evictionsetsize,
-		int sameeviction, int congruentvirtualaddrs, int histogramsize,
-		int histogramscale) {
+void analysehitandmissvariation(char *filename, int analysissize,
+		int evictionsetsize, int sameeviction, int congruentvirtualaddrs,
+		int histogramsize, int histogramscale) {
 	evictiondata_t *evictiondata = calloc(1, sizeof(evictiondata_t));
 	int mappedsize;
 	// Paper Cache-access pattern attack on disaligned AES t-tables
@@ -602,9 +603,35 @@ void analysehitandmissvariation(char *filename, int analysissize, int evictionse
 	const char *headers[headerssize];
 	headers[0] = "Hits";
 	headers[1] = "Misses";
-	biarraytocsvwithstrheaders(filename, headers,
-			analysissize, headerssize, analysis_array);
+	biarraytocsvwithstrheaders(filename, headers, analysissize, headerssize,
+			analysis_array);
 	disposel1cache(llcache);
+}
+
+int hitevaluation(int size, unsigned int *analysis, int startanalysisidx) {
+	int i, analysisidx;
+	unsigned long long *basepointer = mmap(0, size, PROT_READ | PROT_WRITE,
+	MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+	//Init to populate pages
+	for (i = 0; i < size; i += PAGES_SIZE) {
+		unsigned long long *aux = ((void *) basepointer) + i;
+		aux[0] = i;
+	}
+
+//	int auxanalysis;
+	for (i = 0, analysisidx = startanalysisidx; i < size; i += PAGES_SIZE, ++analysisidx) {
+		void *aux = ((void *) basepointer) + i;
+//		unsigned long long start = getcurrenttsc();
+//		aux[0];
+//		auxanalysis = getcurrenttsc() - start < UINT_MAX? auxanalysis : UINT_MAX;
+//		analysis[analysisidx] = auxanalysis;
+		analysis[analysisidx] = timeaccessway(aux);
+	}
+	return analysisidx+1;
+
+	//Dispose array mmap
+	//munmap(basepointer, size);
 }
 
 int main() {
@@ -693,5 +720,20 @@ int main() {
 ////			llcache->llc_analysis,
 ////			MAX_TIMES_TO_CSV, DEBUG_NR_SETS/*LL_CACHE_NUMBER_OF_SETS*/);
 
+	//Test L1,L2 and RAM cycles of hits
+	unsigned int l1size = 6 * 64 * 64;
+	unsigned int llcsize = 16 * 1024 * 64;
+	unsigned int ramsize = llcsize * 2;
+	unsigned int evaluationsize = l1size + llcsize + ramsize;
+	unsigned int *evaluation = mmap(0, evaluationsize * sizeof(unsigned int),
+	PROT_READ | PROT_WRITE, MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	const char * dstfilename = concat(VARIATION_ANALYSIS_DATA_DIRECTORY,
+			"l1_llc_ram_evaluation.data");
+	int analysedsize = 0;
+	analysedsize = hitevaluation(l1size, evaluation, analysedsize);
+	analysedsize = hitevaluation(llcsize, evaluation, analysedsize);
+	analysedsize = hitevaluation(ramsize, evaluation, analysedsize);
+
+	arraytocsv(dstfilename, analysedsize, evaluation);
 	return 0;
 }
