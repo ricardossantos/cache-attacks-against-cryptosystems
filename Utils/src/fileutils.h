@@ -8,15 +8,14 @@
 #include <stdio.h>
 #include <unistd.h> //close
 
-char* concat(const char *s1, const char *s2)
-{
-    const size_t len1 = strlen(s1);
-    const size_t len2 = strlen(s2);
-    char *result = malloc(len1+len2+1);//+1 for the zero-terminator
-    //in real code you would check for errors in malloc here
-    memcpy(result, s1, len1);
-    memcpy(result+len1, s2, len2+1);//+1 to copy the null-terminator
-    return result;
+char* concat(const char *s1, const char *s2) {
+	const size_t len1 = strlen(s1);
+	const size_t len2 = strlen(s2);
+	char *result = malloc(len1 + len2 + 1); //+1 for the zero-terminator
+	//in real code you would check for errors in malloc here
+	memcpy(result, s1, len1);
+	memcpy(result + len1, s2, len2 + 1);    //+1 to copy the null-terminator
+	return result;
 }
 
 void arraytodatafile(char dstfilename[], unsigned short int * src,
@@ -34,7 +33,7 @@ void arraytodatafile(char dstfilename[], unsigned short int * src,
 		fprintf(fptr, "%d", i);
 		for (j = 0; j < columnsize; ++j) {
 			fprintf(fptr, "%d ", *src);
-			if(j == columnsize-1)
+			if (j == columnsize - 1)
 				fprintf(fptr, "%d", *src);
 			src++;
 		}
@@ -52,7 +51,7 @@ void arraytodatafilewithoutlabels(char dstfilename[], unsigned short int * src,
 	for (i = 0; i < rowsize; i++) {
 		for (j = 0; j < columnsize; ++j) {
 			fprintf(fptr, "%d ", *src);
-			if(j == columnsize-1)
+			if (j == columnsize - 1)
 				fprintf(fptr, "%d", *src);
 			src++;
 		}
@@ -87,6 +86,20 @@ void biarraytocsvwithstrheaders(char dstfilename[], char **headers,
 		for (j = 0; j < columnsize; ++j) {
 			fprintf(fptr, "%d,%u,%s\n", i, src[i][j], headers[j]);
 		}
+	}
+	fclose(fptr);
+}
+
+void twoarraystocsvwithstrheaders(char dstfilename[], char * headersrc1,
+		char * headersrc2, int scale, unsigned int size, unsigned int *src1,
+		unsigned int *src2) {
+	FILE* fptr;
+	int i;
+
+	fptr = fopen(dstfilename, "w");
+	for (i = 0; i < size; ++i) {
+		fprintf(fptr, "%d,%u,%s\n", i * scale, src1[i], headersrc1);
+		fprintf(fptr, "%d,%u,%s\n", i * scale, src2[i], headersrc2);
 	}
 	fclose(fptr);
 }

@@ -34,7 +34,7 @@ void accessway(void * addr) {
 	movl(addr);
 }
 
-unsigned int timeaccessway(void *addr){
+unsigned int timeaccessway(void *addr) {
 	return time_movl(addr);
 }
 
@@ -134,8 +134,9 @@ void missedalladdrs(unsigned int *out_analysis, unsigned long ptr_offset,
 }
 
 // Analyse addrs using Flush+Reload technique
-void fr_analysealladdrs(int flag_output_raw_data, unsigned int *out_analysis, unsigned long ptr_offset,
-		long int *exe_addrs, int nr_addrs, int threshold) {
+void fr_analysealladdrs(int flag_output_raw_data, unsigned int *out_analysis,
+		unsigned long ptr_offset, long int *exe_addrs, int nr_addrs,
+		int threshold) {
 	int addrs_index;
 	for (addrs_index = 0; addrs_index < nr_addrs; ++addrs_index) {
 		char * aux = (char*) exe_addrs[addrs_index];
@@ -149,8 +150,9 @@ void fr_analysealladdrs(int flag_output_raw_data, unsigned int *out_analysis, un
 }
 
 // Analyse addrs using Flush+Flush technique
-void ff_analysealladdrs(int flag_output_raw_data, unsigned int *out_analysis, unsigned long ptr_offset,
-		long int *exe_addrs, int nr_addrs, int threshold) {
+void ff_analysealladdrs(int flag_output_raw_data, unsigned int *out_analysis,
+		unsigned long ptr_offset, long int *exe_addrs, int nr_addrs,
+		int threshold) {
 	int addrs_index;
 	for (addrs_index = 0; addrs_index < nr_addrs; ++addrs_index) {
 		char * aux = (char*) exe_addrs[addrs_index];

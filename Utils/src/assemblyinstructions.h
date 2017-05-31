@@ -95,7 +95,6 @@ unsigned int time_clflush(void* addr) {
 	return time;
 }
 
-
 unsigned int time_movl(void* addr) {
 	volatile unsigned int time;
 	asm volatile(
