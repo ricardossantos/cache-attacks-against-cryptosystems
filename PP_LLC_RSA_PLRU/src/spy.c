@@ -1,5 +1,7 @@
 #define _GNU_SOURCE
+#include <math.h>
 #include <stdio.h>
+
 #include <limits.h>
 #include "../../Utils/src/cachetechniques.h"
 #include "../../Utils/src/fileutils.h"
@@ -9,13 +11,14 @@
 #define PAGEMAP_INFO_SIZE 8 /*There are 64 bits of info for each page on the pagemap*/
 #define CACHE_NR_OF_BITS_OF_OFFSET 6
 #define CACHE_LINE_NUMBER_OF_BYTES 64
-#define MAX_TIMES_TO_CSV 300000
+#define MAX_TIMES_TO_CSV 10000 /*BEFORE WAS 300000*/
 #define PRIME_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/prime_static_analysis.data"
 #define PROBE_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/probe_static_analysis.data"
 #define MAX_TIMES_TO_OBTAIN_THRESHOLD 512*1024
 #define VARIATION_ANALYSIS_DATA_FILENAME "pp_llc_hit_miss_variation_static_analysis.data"
 #define VARIATION_ANALYSIS_DATA_DIRECTORY "/home/root/thesis-code/"
-#define RANDOMIZESETPTRS 1
+#define SCAN_CACHE_DATA_DIRECTORY "/home/root/thesis-code/scan/"
+#define RANDOMIZESETPTRS 0
 #define handle_error(msg) \
 	do { perror(msg); exit(EXIT_FAILURE); } while (0)
 
@@ -70,8 +73,8 @@ typedef struct llcache {
 	int bitsofoffset;
 	unsigned short *randomized;
 	int randomizedsets;
-	unsigned short int *analysis;
-} llcache_t;
+	unsigned int *analysis;
+} cache_t;
 /*
  void * testset2 = BASE_CACHE_LINE_PTR((*llcache)->basepointer, set, way);
  void *physicaladdr2 = getphysicaladdr(testset2 , (*llcache)->pagemap);
@@ -94,13 +97,13 @@ typedef struct evictiondata {
 	unsigned int *miss_counts;
 } evictiondata_t;
 
-void* getbasecachelineptr(llcache_t *cache, int set, int way) {
+void* getbasecachelineptr(cache_t *cache, int set, int way) {
 	return (void *) (((unsigned int) cache->basepointer)
 			+ ((set) * CACHE_LINE_NUMBER_OF_BYTES)
 			+ ((way) * (cache->numberofsets * cache->linesize)));
 }
 
-void* getprevcachelineptr(llcache_t *cache, int set, int way) {
+void* getprevcachelineptr(cache_t *cache, int set, int way) {
 	return (void *) (((unsigned int) cache->basepointer)
 			+ ((set) * CACHE_LINE_NUMBER_OF_BYTES)
 			+ ((way) * (cache->numberofsets * cache->linesize))
@@ -108,96 +111,95 @@ void* getprevcachelineptr(llcache_t *cache, int set, int way) {
 }
 
 // Prepare and Prime LLC
-void preparellcache(llcache_t **llcache, int mappedsize, int numberofsets,
+void preparecache(cache_t **cache, int mappedsize, int numberofsets,
 		int numberofways, int linesize, int bitsofoffset) {
 	int set, way;
 
-	*llcache = calloc(1, sizeof(llcache_t));
+	*cache = calloc(1, sizeof(cache_t));
 
 	// Get file pointer for /proc/<pid>/pagemap
-	(*llcache)->pagemap = open("/proc/self/pagemap", O_RDONLY);
+	(*cache)->pagemap = open("/proc/self/pagemap", O_RDONLY);
 
 	// Map ll cache
-	(*llcache)->basepointer = mmap(0, mappedsize,
+	(*cache)->basepointer = mmap(0, mappedsize,
 	PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-	if ((*llcache)->basepointer == MAP_FAILED)
+	if ((*cache)->basepointer == MAP_FAILED)
 		handle_error("mmap");
 
-	(*llcache)->mappedsize = mappedsize;
-	(*llcache)->numberofsets = numberofsets;
-	(*llcache)->numberofways = numberofways;
-	(*llcache)->linesize = linesize;
-	(*llcache)->bitsofoffset = bitsofoffset;
-	(*llcache)->randomized = calloc(numberofsets, sizeof(unsigned short));
-	(*llcache)->analysis = calloc(MAX_TIMES_TO_CSV * numberofsets,
+	(*cache)->mappedsize = mappedsize;
+	(*cache)->numberofsets = numberofsets;
+	(*cache)->numberofways = numberofways;
+	(*cache)->linesize = linesize;
+	(*cache)->bitsofoffset = bitsofoffset;
+	(*cache)->randomized = calloc(numberofsets, sizeof(unsigned short));
+	(*cache)->analysis = calloc(MAX_TIMES_TO_CSV * numberofsets,
 			sizeof(unsigned short int));
 
 	// Prepare mapping/linked list
 	for (set = 0; set < numberofsets; ++set) {
 		for (way = 0; way < numberofways - 1; way++) {
 			// (set,way)->nextline = &(set,way+1)
-			(*(void **) (getbasecachelineptr((*llcache), set, way))) =
-					getbasecachelineptr((*llcache), set, way + 1);
+			(*(void **) (getbasecachelineptr((*cache), set, way))) =
+					getbasecachelineptr((*cache), set, way + 1);
 			// (set,way+1)->previousline = &(set,way)
-			(*(void **) (getprevcachelineptr((*llcache), set, way + 1))) =
-					getprevcachelineptr((*llcache), set, way);
+			(*(void **) (getprevcachelineptr((*cache), set, way + 1))) =
+					getprevcachelineptr((*cache), set, way);
 		}
 		if (!RANDOMIZESETPTRS && set < numberofsets - 1) {
 			// (set,LL_CACHE_NUMBER_OF_WAYS-1)->nextline = &(set+1,0);
-			(*(void **) (getbasecachelineptr((*llcache), set, numberofways - 1))) =
-					getbasecachelineptr((*llcache), set + 1, 0);
+			(*(void **) (getbasecachelineptr((*cache), set, numberofways - 1))) =
+					getbasecachelineptr((*cache), set + 1, 0);
 			// (set,0)->previousline = &(set+1,LL_CACHE_NUMBER_OF_WAYS-1);
-			(*(void **) (getprevcachelineptr((*llcache), set, 0))) =
-					getprevcachelineptr((*llcache), set + 1, numberofways - 1);
+			(*(void **) (getprevcachelineptr((*cache), set, 0))) =
+					getprevcachelineptr((*cache), set + 1, numberofways - 1);
 		}
 	}
 	if (!RANDOMIZESETPTRS) {
 		// (LL_CACHE_NUMBER_OF_SETS-1,LL_CACHE_NUMBER_OF_WAYS-1)->nextline = &(0,0)
-		(*(void **) (getbasecachelineptr((*llcache), numberofsets - 1,
-				numberofways - 1))) = getbasecachelineptr((*llcache), 0, 0);
+		(*(void **) (getbasecachelineptr((*cache), numberofsets - 1,
+				numberofways - 1))) = getbasecachelineptr((*cache), 0, 0);
 		// (LL_CACHE_NUMBER_OF_SETS-1,0)->previousline = &(0,LL_CACHE_NUMBER_OF_WAYS-1)
-		(*(void **) (getprevcachelineptr((*llcache), numberofsets - 1, 0))) =
-				getprevcachelineptr((*llcache), 0, numberofways - 1);
+		(*(void **) (getprevcachelineptr((*cache), numberofsets - 1, 0))) =
+				getprevcachelineptr((*cache), 0, numberofways - 1);
 	}
 	if (RANDOMIZESETPTRS) {
 		//Init randomization auxiliar list
 		for (set = 0; set < numberofsets; ++set) {
-			(*llcache)->randomized[set] = set;
+			(*cache)->randomized[set] = set;
 		}
-		(*llcache)->randomizedsets = numberofsets;
+		(*cache)->randomizedsets = numberofsets;
 		//Perform randomization
-		for (set = 0; set < (*llcache)->randomizedsets; ++set) {
-			int randset = random() % ((*llcache)->randomizedsets - set) + set;
-			unsigned short aux = (*llcache)->randomized[randset];
-			(*llcache)->randomized[randset] = (*llcache)->randomized[set];
-			(*llcache)->randomized[set] = aux;
+		for (set = 0; set < (*cache)->randomizedsets; ++set) {
+			int randset = random() % ((*cache)->randomizedsets - set) + set;
+			unsigned short aux = (*cache)->randomized[randset];
+			(*cache)->randomized[randset] = (*cache)->randomized[set];
+			(*cache)->randomized[set] = aux;
 		}
 		//Build list randomized dependencies
-		for (set = 0; set < (*llcache)->randomizedsets - 1; ++set) {
+		for (set = 0; set < (*cache)->randomizedsets - 1; ++set) {
 			// (set,LL_CACHE_NUMBER_OF_WAYS-1)->nextline = &(set+1,0);
-			(*(void **) (getbasecachelineptr((*llcache),
-					(*llcache)->randomized[set], numberofways - 1))) =
-					getbasecachelineptr((*llcache),
-							(*llcache)->randomized[set + 1], 0);
+			(*(void **) (getbasecachelineptr((*cache),
+					(*cache)->randomized[set], numberofways - 1))) =
+					getbasecachelineptr((*cache), (*cache)->randomized[set + 1],
+							0);
 			// (set,0)->previousline = &(set+1,LL_CACHE_NUMBER_OF_WAYS-1);
-			(*(void **) (getprevcachelineptr((*llcache),
-					(*llcache)->randomized[set], 0))) = getprevcachelineptr(
-					(*llcache), (*llcache)->randomized[set + 1],
-					numberofways - 1);
+			(*(void **) (getprevcachelineptr((*cache),
+					(*cache)->randomized[set], 0))) = getprevcachelineptr(
+					(*cache), (*cache)->randomized[set + 1], numberofways - 1);
 		}
 		// (LL_CACHE_NUMBER_OF_SETS-1,LL_CACHE_NUMBER_OF_WAYS-1)->nextline = &(0,0)
-		(*(void **) (getbasecachelineptr((*llcache),
-				(*llcache)->randomized[numberofsets - 1], numberofways - 1))) =
-				getbasecachelineptr((*llcache), (*llcache)->randomized[0], 0);
+		(*(void **) (getbasecachelineptr((*cache),
+				(*cache)->randomized[numberofsets - 1], numberofways - 1))) =
+				getbasecachelineptr((*cache), (*cache)->randomized[0], 0);
 		// (LL_CACHE_NUMBER_OF_SETS-1,0)->previousline = &(0,LL_CACHE_NUMBER_OF_WAYS-1)
-		(*(void **) (getprevcachelineptr((*llcache),
-				(*llcache)->randomized[numberofsets - 1], 0))) =
-				getprevcachelineptr((*llcache), (*llcache)->randomized[0],
+		(*(void **) (getprevcachelineptr((*cache),
+				(*cache)->randomized[numberofsets - 1], 0))) =
+				getprevcachelineptr((*cache), (*cache)->randomized[0],
 						numberofways - 1);
 	}
 }
 
-void disposecache(llcache_t *llcache) {
+void disposecache(cache_t *llcache) {
 	if (llcache->basepointer != NULL) {
 		munmap(llcache->basepointer, llcache->mappedsize);
 	}
@@ -208,7 +210,26 @@ void disposecache(llcache_t *llcache) {
 	free(llcache);
 }
 
-unsigned int prime(llcache_t *cache, int set) {
+unsigned int prime1set1wayinthemiddle(cache_t *cache, int set) {
+	int way = cache->numberofways/2;
+	unsigned int setcycles = 0;
+	void *setpointer;
+	if (RANDOMIZESETPTRS)
+		setpointer = getbasecachelineptr(cache, cache->randomized[set], 0);
+	else
+		setpointer = getbasecachelineptr(cache, set, 0);
+	while (way--) {
+		//printf("PRIMEWAY 64B: %x\n", setpointer);
+
+//		//Transverse the pointer here
+//		printf("PRIME POINTER: %x\n",setpointer);
+		setpointer = (*(void **) setpointer);
+	}
+	setcycles += timeaccessway(setpointer);
+	return setcycles;
+}
+
+unsigned int prime(cache_t *cache, int set) {
 	int way = cache->numberofways;
 	unsigned int setcycles = 0;
 	void *setpointer;
@@ -226,7 +247,7 @@ unsigned int prime(llcache_t *cache, int set) {
 	return setcycles;
 }
 
-unsigned int probe(llcache_t *cache, int set) {
+unsigned int probe(cache_t *cache, int set) {
 	int way = cache->numberofways;
 	unsigned int setcycles = 0;
 	void *setpointer;
@@ -276,7 +297,7 @@ void analysellcache(unsigned short int *out_analysis, void * llbaseptr,
 /* [+] END [+] Least Recently Used Replacement Policy <- No need to this type of attack */
 
 void obtainevictiondata(int histogramsize, int histogramscale, int maxruns,
-		evictiondata_t *evictiondata, llcache_t *cache) {
+		evictiondata_t *evictiondata, cache_t *cache) {
 
 	// Preparing histograms
 	const int MID_ARRAY = PAGES_SIZE / 2;
@@ -296,16 +317,20 @@ void obtainevictiondata(int histogramsize, int histogramscale, int maxruns,
 			cache->bitsofoffset);
 
 	//Obtain the same set as the array
-	unsigned int set1, set2;
-	void * ptr;
-	if (RANDOMIZESETPTRS)
-		ptr = getbasecachelineptr(cache, cache->randomized[0], 0);
-	else
-		ptr = getbasecachelineptr(cache, 0, 0);
-	for (set1 = 0; set1 < cache->numberofsets - 1; ++set1) {
-		physicaladdr = getphysicaladdr(ptr, cache->pagemap);
-		set2 = getsetindex(physicaladdr, cache->numberofsets,
-				cache->bitsofoffset);
+//	unsigned int set1, set2,way;
+//	void * ptr;
+//	if (RANDOMIZESETPTRS)
+//		ptr = getbasecachelineptr(cache, cache->randomized[0], 0);
+//	else
+//		ptr = getbasecachelineptr(cache, 0, 0);
+////
+//		for (set1 = 0; set1 < cache->numberofsets; ++set1) {
+//			for (way = 0; way < cache->numberofways; ++way){
+//			physicaladdr = getphysicaladdr(ptr, cache->pagemap);
+//			set2 = getsetindex(physicaladdr, cache->numberofsets,
+//					cache->bitsofoffset);
+//			//if(set1==0)
+//
 //			if(!RANDOMIZESETPTRS)
 //				printf(
 //						"CYCLE SET1: %d || SET FROM VA: %d || PTR: %x || PHYSICAL ADDR: %x \n",
@@ -314,16 +339,20 @@ void obtainevictiondata(int histogramsize, int histogramscale, int maxruns,
 //				printf(
 //						"CYCLE SET1: %d || SET FROM VA: %d || PTR: %x || PHYSICAL ADDR: %x \n",
 //						cache->randomized[set1], set2, ptr, physicaladdr);
-		if (set == set2) {
-			break;
-		}
-		ptr = (*(void **) ptr);
-	}
+////			if (set == set2) {
+////				break;
+////			}
+//			ptr = (*(void **) ptr);
+//		}
+//		if (set == set2) {
+//			break;
+//		}
+//	}
 
 	// Preparing for the hit histogram
 	accessway(array + MID_ARRAY);
 
-	set = set1;
+	set = 512;
 	// Hit histogram
 	for (i = 0; i < maxruns; ++i) {
 		prime(cache, set);
@@ -414,9 +443,9 @@ void analysehitandmissvariation(int mappedsize, int numberofsets,
 	int i;
 	unsigned int analysis_array[analysissize][headerssize];
 
-	llcache_t *cache;
+	cache_t *cache;
 
-	preparellcache(&cache, mappedsize, numberofsets, numberofways, linesize,
+	preparecache(&cache, mappedsize, numberofsets, numberofways, linesize,
 			bitsofoffset);
 
 	for (i = 0; i < analysissize; ++i) {
@@ -501,10 +530,10 @@ void waitforvictimactivity(waitforvictim_t *waitforvictim) {
 }
 /*WAIT VICTIM ACTIVITY WITH FLUSH+RELOAD*/
 
-void analysellc(int set, llcache_t *cache, int maxruns) {
+void analysellc(int cyclestartidx, int cycleincrement, int set, cache_t *cache, int maxruns) {
 	int i;
 
-	for (i = set; i < maxruns; i += cache->numberofsets) {
+	for (i = cyclestartidx; i < maxruns; i += cycleincrement) {
 
 		//Prime
 		prime(cache, set);
@@ -517,13 +546,13 @@ void analysellc(int set, llcache_t *cache, int maxruns) {
 void generatehistogram(char *prefix, int numberofsets, int numberofways,
 		int cachelinesize, int timesmappedsize, int bitsofoffset,
 		int histogramscale, int histogramsize) {
-	llcache_t *cache;
+	cache_t *cache;
 	int mappedsize = numberofsets * numberofways * cachelinesize
 			* timesmappedsize;
 	evictiondata_t *evictiondata = calloc(1, sizeof(evictiondata_t));
 
-	preparellcache(&cache, mappedsize, numberofsets, numberofways,
-			cachelinesize, bitsofoffset);
+	preparecache(&cache, mappedsize, numberofsets, numberofways, cachelinesize,
+			bitsofoffset);
 	obtainevictiondata(histogramsize, histogramscale,/*maxruns*/
 	MAX_TIMES_TO_OBTAIN_THRESHOLD, evictiondata, cache);
 
@@ -535,23 +564,161 @@ void generatehistogram(char *prefix, int numberofsets, int numberofways,
 	disposecache(cache);
 }
 
+int hitevaluation(int numberofsets, int numberofways, int cachelinesize, int bitsofoffset, int timesmappedsize, unsigned int *analysis, int startanalysisidx) {
+	int i, analysisidx;
+	cache_t *cache;
+	int mappedsize = numberofsets * numberofways * cachelinesize
+				* timesmappedsize;
+	preparecache(&cache, mappedsize, numberofsets, numberofways, cachelinesize,
+			bitsofoffset);
+
+
+//	int auxanalysis;
+	for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
+			++i, ++analysisidx) {
+		prime(cache,i);
+		analysis[analysisidx] = probe(cache,i);
+	}
+	return analysisidx + 1;
+
+	//Dispose array mmap
+	//munmap(basepointer, size);
+}
+
+int missevaluation(int numberofsets, int numberofways, int cachelinesize, int bitsofoffset, int timesmappedsize, unsigned int *analysis, int startanalysisidx) {
+	int i, analysisidx;
+	cache_t *cache, *testvictim;
+	void *victimsetpointer, *array;
+	int mappedsize = numberofsets * numberofways * cachelinesize
+				* timesmappedsize;
+	preparecache(&cache, mappedsize, numberofsets, numberofways, cachelinesize,
+			bitsofoffset);
+	preparecache(&testvictim, mappedsize, numberofsets, numberofways, cachelinesize,
+				bitsofoffset);
+
+	int MIDARRAY = PAGES_SIZE /2;
+	array = mmap(0, PAGES_SIZE, PROT_READ | PROT_WRITE,
+	MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (array == MAP_FAILED)
+		handle_error("mmap");
+
+	//victimsetpointer = getbasecachelineptr(testvictim, i, numberofways/2);
+	for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
+			++i, ++analysisidx) {
+
+		prime(cache,i);
+
+		//VERY GOOD WITH ONE WAY
+		prime1set1wayinthemiddle(testvictim,i);
+		//VERYGOOD BUT ALL WAYS prime(testvictim,i);
+		//BAD accessway(array + i);
+		//BAD accessway(victimsetpointer);
+		analysis[analysisidx] = probe(cache,i);
+	}
+	return analysisidx + 1;
+
+	//Dispose array mmap
+	//munmap(basepointer, size);
+}
+
+//Test L1,LLC and RAM cycles of hits
+void evaluate_l1_llc_ram_with_prime_probe() {
+	int l1nrsets = 64;
+	int l1nrways = 6;
+	int bytescacheline = 64;
+	int bitsofoffset = 6;
+	unsigned int l1size = l1nrsets * l1nrways * bytescacheline;
+	int llcnrsets = 1024;
+	int llcnrways = 16;
+	unsigned int llcsize = llcnrsets * llcnrways * bytescacheline;
+	unsigned int ramsize = llcsize * 2;
+	unsigned int evaluationsize = l1nrsets + llcnrsets + llcnrsets*2;
+	unsigned int *evaluation = mmap(0, evaluationsize * sizeof(unsigned int),
+	PROT_READ | PROT_WRITE, MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	const char * dstfilename = concat(VARIATION_ANALYSIS_DATA_DIRECTORY,
+			"l1_llc_ram_prime+probe_evaluation.data");
+	int analysedsize = 0;
+	analysedsize = hitevaluation(l1nrsets,l1nrways,bytescacheline,bitsofoffset,1,evaluation, analysedsize);
+	analysedsize = hitevaluation(llcnrsets,llcnrways,bytescacheline,bitsofoffset,1, evaluation, analysedsize);
+	analysedsize = hitevaluation(llcnrsets*2,llcnrways*2,bytescacheline,bitsofoffset,1, evaluation, analysedsize);
+
+	arraytocsv(dstfilename, analysedsize, evaluation);
+}
+
+//Test L1,LLC and RAM cycles of misses
+void evaluate_l1_llc_ram_with_prime_access_probe() {
+	int l1nrsets = 64;
+	int l1nrways = 6;
+	int bytescacheline = 64;
+	int bitsofoffset = 6;
+	unsigned int l1size = l1nrsets * l1nrways * bytescacheline;
+	int llcnrsets = 1024;
+	int llcnrways = 16;
+	unsigned int llcsize = llcnrsets * llcnrways * bytescacheline;
+	unsigned int ramsize = llcsize * 2;
+	unsigned int evaluationsize = l1nrsets + llcnrsets + llcnrsets*2;
+	unsigned int *evaluation = mmap(0, evaluationsize * sizeof(unsigned int),
+	PROT_READ | PROT_WRITE, MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	const char * dstfilename = concat(VARIATION_ANALYSIS_DATA_DIRECTORY,
+			"l1_llc_ram_prime+access+probe_evaluation.data");
+	int analysedsize = 0;
+	analysedsize = missevaluation(l1nrsets,l1nrways,bytescacheline,bitsofoffset,1,evaluation, analysedsize);
+	analysedsize = missevaluation(llcnrsets,llcnrways,bytescacheline,bitsofoffset,1, evaluation, analysedsize);
+	analysedsize = missevaluation(llcnrsets*2,llcnrways*2,bytescacheline,bitsofoffset,1, evaluation, analysedsize);
+
+	arraytocsv(dstfilename, analysedsize, evaluation);
+}
+
+//To generate the mean graphs
+float mean(const unsigned int *data, const int size){
+	int i,sum = 0.0;
+	for(i=0; i < size;++i){
+		sum += data[i];
+	}
+	return sum/size;
+}
+
+float standarddeviation(const float mean, const unsigned int *data, const int size){
+	int i;
+	float dev,var,sdev = 0.0;
+	for(i=0; i < size;++i){
+		dev = (data[i] - mean) * (data[i] - mean);
+		sdev += dev;
+	}
+	var = sdev / (size - 1);
+	sdev = sqrt(var);
+	return sdev;
+}
+
+float coefficientvariation(float sdev,float mean){
+	return (sdev/mean)*100;
+}
+
 int main() {
-	generatehistogram("LLC", /*numberofsets*/1024,
-	/*numberofways*/16, /*cachelinesize*/64, /*timesmappedsize*/3, /*bitsofoffset*/
-	6, /*histogramscale*/
-	5, /*histogramsize*/1000);
+
+	//Evaluate Prime+Probe
+	evaluate_l1_llc_ram_with_prime_probe();
+
+	//Evaluate Prime+Access+Probe
+	//evaluate_l1_llc_ram_with_prime_access_probe();
+
+//	generatehistogram("LLC", /*numberofsets*/1024,
+//	/*numberofways*/16, /*cachelinesize*/64, /*timesmappedsize*/1, /*bitsofoffset*/
+//	6, /*histogramscale*/
+//	5, /*histogramsize*/300);
+
 //	generatehistogram("L1", /*numberofsets*/64,
 //	/*numberofways*/6, /*cachelinesize*/64, /*timesmappedsize*/1,/*bitsofoffset*/6, /*histogramscale*/
 //			5, /*histogramsize*/
 //			300);
 
-	llcache_t *cache;
+	cache_t *cache;
 	evictiondata_t *evictiondata;
 	int mappedsize, maxruns;
-
-	const int histogramsize = 300;
-	const int histogramscale = 5;
-
+//
+//	const int histogramsize = 300;
+//	const int histogramscale = 5;
+//
 	const int numberofsets = 1024;
 	const int numberofways = 16;
 	const int cachelinesize = 64;
@@ -559,40 +726,48 @@ int main() {
 
 	// Paper Cache-access pattern attack on disaligned AES t-tables
 	// (3/4)^(4*3) = 1.367% probability LLC not being totally evicted
-	mappedsize = numberofsets * numberofways * CACHE_LINE_NUMBER_OF_BYTES;
+	mappedsize = numberofsets * numberofways * cachelinesize;
 
-	maxruns = MAX_TIMES_TO_OBTAIN_THRESHOLD;
+	maxruns = 5000;
 	evictiondata = calloc(1, sizeof(evictiondata_t));
-	preparellcache(&cache, mappedsize, numberofsets, numberofways,
-			cachelinesize, bitsofoffset);
 
-//	char filename[200] = "";
-//	sprintf(filename, "%s%s", VARIATION_ANALYSIS_DATA_DIRECTORY,
-//	VARIATION_ANALYSIS_DATA_FILENAME);
+//	preparecache(&cache, mappedsize, numberofsets, numberofways,
+//			cachelinesize, bitsofoffset);
 //
-//	analysehitandmissvariation(mappedsize, filename, analysissize,
-//			histogramsize, histogramscale);
-
-	obtainevictiondata(histogramsize, histogramscale, maxruns, evictiondata,
-			cache);
-	if (evictiondata->evictionrate > 50) {
-		if (evictiondata->maxhit >= evictiondata->maxmiss) {
-			printf("[!] Cycles of Hit >= Cycles of Miss [!]\n");
-		}
-		printf("Max Hit: %u\n", evictiondata->maxhit);
-		printf("Max Miss: %u\n", evictiondata->maxmiss);
-		printf("Threshold: %u\n", evictiondata->threshold);
-		printf("Hits Rate: %lf\%\n", evictiondata->hitsrate);
-		printf("Eviction Rate: %lf\%\n", evictiondata->evictionrate);
-	}
-
+////	char filename[200] = "";
+////	sprintf(filename, "%s%s", VARIATION_ANALYSIS_DATA_DIRECTORY,
+////	VARIATION_ANALYSIS_DATA_FILENAME);
+////
+////	analysehitandmissvariation(mappedsize, filename, analysissize,
+////			histogramsize, histogramscale);
+//
+//	obtainevictiondata(histogramsize, histogramscale, maxruns, evictiondata,
+//			cache);
+//	if (evictiondata->evictionrate > 50) {
+//		if (evictiondata->maxhit >= evictiondata->maxmiss) {
+//			printf("[!] Cycles of Hit >= Cycles of Miss [!]\n");
+//		}
+//		printf("Max Hit: %u\n", evictiondata->maxhit);
+//		printf("Max Miss: %u\n", evictiondata->maxmiss);
+//		printf("Threshold: %u\n", evictiondata->threshold);
+//		printf("Hits Rate: %lf\%\n", evictiondata->hitsrate);
+//		printf("Eviction Rate: %lf\%\n", evictiondata->evictionrate);
+//	}
+//
 	waitforvictim_t *waitforvictim;
 	int setidx;
 
-	preparellcache(&cache, mappedsize, numberofsets, numberofways,
-			cachelinesize, bitsofoffset);
+	preparecache(&cache, mappedsize, numberofsets, numberofways, cachelinesize,
+			bitsofoffset);
 	preparewaitforactivity(&waitforvictim);
 
+	//For N files
+	const int cyclestartidx = 0;
+	const int cycleincrement = 1;
+	char *nfilename;
+	float *means = calloc(numberofsets, sizeof(float));
+	float *standarddeviations = calloc(numberofsets, sizeof(float));
+	float *coefficientevariations = calloc(numberofsets, sizeof(float));
 	for (setidx = 0; setidx < numberofsets; ++setidx) {
 		printf("\nWaiting for activity...\n");
 
@@ -600,11 +775,34 @@ int main() {
 
 		//int setidx = 1;
 		printf("Analyse set number: %d\n", setidx);
-		analysellc(setidx, cache, MAX_TIMES_TO_CSV * numberofsets);
+		//For 1 file
+		//analysellc(setidx, cache->numberofsets, setidx, cache, MAX_TIMES_TO_CSV * numberofsets);
+
+		//For N files
+		analysellc(cyclestartidx, cycleincrement, setidx, cache, MAX_TIMES_TO_CSV);
+		sprintf(nfilename, "%d", setidx);
+		nfilename = concat(concat(SCAN_CACHE_DATA_DIRECTORY, concat("SET_",nfilename)), "_prime_probe.data");
+		//arraytocsv(nfilename, MAX_TIMES_TO_CSV, cache->analysis);
+
+		means[setidx] = mean(cache->analysis, MAX_TIMES_TO_CSV);
+		standarddeviations[setidx] = standarddeviation(means[setidx], cache->analysis, MAX_TIMES_TO_CSV);
+		coefficientevariations[setidx] = coefficientvariation(standarddeviations[setidx],means[setidx]);
+
+		//delay
+		sleep(1);
 	}
 
-	arraytodatafilewithoutlabels(PROBE_ANALYSIS_DATA_FILENAME, cache->analysis,
-	MAX_TIMES_TO_CSV, numberofsets);
+	nfilename = concat(concat(SCAN_CACHE_DATA_DIRECTORY, "MEANS_"), "_prime_probe.data");
+	logsetsstatistic(nfilename,means,numberofsets);
+
+	nfilename = concat(concat(SCAN_CACHE_DATA_DIRECTORY, "STANDARD_DEVIATIONS_"), "_prime_probe.data");
+	logsetsstatistic(nfilename,standarddeviations,numberofsets);
+
+	nfilename = concat(concat(SCAN_CACHE_DATA_DIRECTORY, "COEFFICIENT_VARIATIONS_"), "_prime_probe.data");
+	logsetsstatistic(nfilename,coefficientevariations,numberofsets);
+	//For 1 file
+	//arraytodatafilewithoutlabels(PROBE_ANALYSIS_DATA_FILENAME, cache->analysis,
+	//MAX_TIMES_TO_CSV, numberofsets);
 
 	disposecache(cache);
 	return 0;

@@ -57,7 +57,6 @@ void arraytodatafilewithoutlabels(char dstfilename[], unsigned short int * src,
 		}
 		fprintf(fptr, "\n");
 	}
-	fprintf(fptr, "%s\n", "e");
 }
 
 void biarraytocsvwithhexheaders(char dstfilename[], long int *headers,
@@ -125,6 +124,24 @@ void arraytocsv(char dstfilename[], unsigned int rowsize, unsigned int src[]) {
 	fptr = fopen(dstfilename, "w");
 	for (i = 0; i < rowsize; i++) {
 		fprintf(fptr, "%d,%u\n", i, src[i]);
+	}
+	fclose(fptr);
+}
+
+typedef struct stats{
+	float mean;
+	float sdev;
+	float cvar;
+}stats_t;
+
+void logsetsstatistic(char dstfilename[], float *value, unsigned int size){
+	FILE* fptr;
+	int i;
+
+	fptr = fopen(dstfilename, "w");
+	for (i = 0; i < size; i++) {
+
+		fprintf(fptr, "%d,%f\n", i, value[i]);
 	}
 	fclose(fptr);
 }

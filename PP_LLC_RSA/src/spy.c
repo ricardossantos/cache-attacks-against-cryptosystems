@@ -60,7 +60,7 @@ typedef struct datacsvfile {
 	cache_t llcache;
 } datacsvfile_t;
 
-void preparellcache(cache_t **llcache, int mappedsize, int numberofsets,
+void preparecache(cache_t **llcache, int mappedsize, int numberofsets,
 		int bitsofoffset) {
 	int i;
 
@@ -467,7 +467,7 @@ void analysehitandmissvariation(int numberofsets, int numberofways,
 	cache_t *llcache;
 	evictionconfig_t *config;
 
-	preparellcache(&llcache, mappedsize, numberofsets,
+	preparecache(&llcache, mappedsize, numberofsets,
 	CACHE_NR_OF_BITS_OF_OFFSET);
 	prepareevictconfig(&config, evictionsetsize, sameeviction,
 			congruentvirtualaddrs);
@@ -589,7 +589,7 @@ void evaluate_l1_llc_ram_with_prime_probe() {
 
 	//Prepare and Map level 1 cache struct
 	int l1mappedsize = 64 * 6 * 64;
-	preparellcache(&l1, l1mappedsize, 64, 6);
+	preparecache(&l1, l1mappedsize, 64, 6);
 	prepareevictconfig(&l1_config, 6, 1, 1);
 
 	//***Evaluate to the L1***
@@ -598,7 +598,7 @@ void evaluate_l1_llc_ram_with_prime_probe() {
 
 	//Prepare and Map last level cache struct
 	int llcmappedsize = 1024 * 16 * 64;
-	preparellcache(&llc, llcmappedsize, 1024, 6);
+	preparecache(&llc, llcmappedsize, 1024, 6);
 	prepareevictconfig(&llc_config, 16, 1, 1);
 
 	//***Evaluate to the LLC***
@@ -607,12 +607,33 @@ void evaluate_l1_llc_ram_with_prime_probe() {
 
 	//Prepare and Map ram struct
 	int rammappedsize = llcmappedsize * 2;
-	preparellcache(&ram, rammappedsize, 1024, 6);
+	preparecache(&ram, rammappedsize, 1024, 6);
 	prepareevictconfig(&ram_config, 16, 1, 1);
 
 	//***Prepare array to the RAM***
 	evaluate_with_prime_probe("RAM", ram, ram_config);
 	disposecache(ram);
+}
+
+int hitevaluation2(int evictionsize, int sameaccesses, int differentaccesses,int numberofsets, int numberofways, int cachelinesize, int bitsofoffset, int timesmappedsize, evictionconfig_t *config, unsigned int *analysis, int startanalysisidx){
+	int i, analysisidx;
+	cache_t *cache;
+	int mappedsize = numberofsets * numberofways * cachelinesize
+				* timesmappedsize;
+	preparecache(&cache, mappedsize, numberofsets, bitsofoffset);
+	prepareevictconfig(&config, evictionsize, sameaccesses, differentaccesses);
+
+//	int auxanalysis;
+	for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
+			++i, ++analysisidx) {
+		prime(config,cache,i);
+		analysis[analysisidx] = probe(config,cache,i);
+	}
+	return analysisidx + 1;
+}
+
+void evaluate_l1_llc_ram_with_prime_probe() {
+
 }
 
 void generatehistogram(char *prefix, int numberofsets, int numberofways,
@@ -624,7 +645,7 @@ void generatehistogram(char *prefix, int numberofsets, int numberofways,
 	int mappedsize = numberofsets * numberofways * waysize * timesmappedsize;
 	evictiondata_t *evictiondata = calloc(1, sizeof(evictiondata_t));
 
-	preparellcache(&cache, mappedsize, numberofsets, bitsofoffset);
+	preparecache(&cache, mappedsize, numberofsets, bitsofoffset);
 	prepareevictconfig(&config, evictionsetsize, sameeviction, differentaddrs);
 
 	obtainevictiondata(mappedsize, evictionsetsize, sameeviction,

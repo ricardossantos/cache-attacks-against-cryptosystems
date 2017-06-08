@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
-#include "../../Utils/src/flushspy.h"
+
 #include "../../Utils/src/cachetechniques.h"
+#include "../../Utils/src/flushspy.h"
 #include "../../Utils/src/fileutils.h"
 
 #define ANALYSIS_CSV_FILENAME "/home/root/thesis-code/flush_reload_static_analysis.csv"
@@ -10,6 +11,7 @@
 #define MAXIDLECOUNT 500
 #define OUTPUTRAWDATA 1
 #define VARIATION_ANALYSIS_DATA_FILENAME "/home/root/thesis-code/fr_llc_hit_miss_variation_static_analysis.data"
+#define VARIATION_ANALYSIS_DATA_DIRECTORY "/home/root/thesis-code/"
 
 typedef struct evictiondata {
 	unsigned int maxhit;
@@ -21,6 +23,8 @@ typedef struct evictiondata {
 	double countcorrectmisses;
 	double allmisses;
 	double evictionrate;
+	unsigned int *hit_counts;
+	unsigned int *miss_counts;
 }evictiondata_t;
 
 void obtainthreshold(int histogramsize, int histogramscale, evictiondata_t *evictiondata) {
@@ -28,10 +32,8 @@ void obtainthreshold(int histogramsize, int histogramscale, evictiondata_t *evic
 	const int PAGES_SIZE = 4096;
 	const int MID_ARRAY = PAGES_SIZE / 2;
 	void *array;
-	unsigned int *hit_counts;
-	hit_counts = calloc(histogramsize, sizeof(unsigned int));
-	unsigned int *miss_counts;
-	miss_counts = calloc(histogramsize, sizeof(unsigned int));
+	evictiondata->hit_counts = calloc(histogramsize, sizeof(unsigned int));
+	evictiondata->miss_counts = calloc(histogramsize, sizeof(unsigned int));
 
 	int i;
 	array = mmap(0, PAGES_SIZE, PROT_READ | PROT_WRITE,
@@ -41,14 +43,14 @@ void obtainthreshold(int histogramsize, int histogramscale, evictiondata_t *evic
 	//4MB
 	for (i = 0; i < MAX_RUNS; ++i) {
 		unsigned long time = reload(array + MID_ARRAY) / histogramscale;
-		hit_counts[time > (histogramsize - 1) ? histogramsize - 1 : time]++;
+		evictiondata->hit_counts[time > (histogramsize - 1) ? histogramsize - 1 : time]++;
 		sched_yield();
 	}
 
 	for (i = 0; i < MAX_RUNS; ++i) {
 		flush(array + MID_ARRAY);
 		unsigned long time = reload(array + MID_ARRAY) / histogramscale;
-		miss_counts[time > (histogramsize - 1) ? histogramsize - 1 : time]++;
+		evictiondata->miss_counts[time > (histogramsize - 1) ? histogramsize - 1 : time]++;
 		sched_yield();
 	}
 	unsigned int hitmax = 0;
@@ -58,17 +60,17 @@ void obtainthreshold(int histogramsize, int histogramscale, evictiondata_t *evic
 	unsigned int missminindex = 0;
 	printf("TSC:           HITS           MISSES\n");
 	for (i = 0; i < histogramsize; ++i) {
-		printf("%3d: %10zu %10zu\n", i * histogramscale, hit_counts[i],
-				miss_counts[i]);
-		if (hitmax < hit_counts[i]) {
-			hitmax = hit_counts[i];
+		printf("%3d: %10zu %10zu\n", i * histogramscale, evictiondata->hit_counts[i],
+				evictiondata->miss_counts[i]);
+		if (hitmax < evictiondata->hit_counts[i]) {
+			hitmax = evictiondata->hit_counts[i];
 			hitmaxindex = i;
 		}
-		if (missmax < miss_counts[i]) {
-			missmax = miss_counts[i];
+		if (missmax < evictiondata->miss_counts[i]) {
+			missmax = evictiondata->miss_counts[i];
 			missmaxindex = i;
 		}
-		if (miss_counts[i] > 3 && missminindex == 0)
+		if (evictiondata->miss_counts[i] > 3 && missminindex == 0)
 			missminindex = i;
 	}
 	double countcorrectmisses = 0, allmisses = 0, countcorrecthits = 0, allhits = 0;
@@ -78,16 +80,16 @@ void obtainthreshold(int histogramsize, int histogramscale, evictiondata_t *evic
 	evictiondata->threshold = maxmiss - (maxmiss - maxhit) / 2;
 
 	for (i = 0; i < histogramsize; ++i) {
-		if (miss_counts[i] > 0 && (i * histogramscale) > threshold) {
+		if (evictiondata->miss_counts[i] > 0 && (i * histogramscale) > threshold) {
 			++countcorrectmisses;
 		}
-		if (miss_counts[i] > 0) {
+		if (evictiondata->miss_counts[i] > 0) {
 			++allmisses;
 		}
-		if (hit_counts[i] > 0 && (i * histogramscale) < threshold) {
+		if (evictiondata->hit_counts[i] > 0 && (i * histogramscale) < threshold) {
 			++countcorrecthits;
 		}
-		if (hit_counts[i] > 0) {
+		if (evictiondata->hit_counts[i] > 0) {
 			++allhits;
 		}
 	}
@@ -277,15 +279,30 @@ void analysehitandmissvariation() {
 
 int main() {
 
-	//analysehitandmissvariation();
-
-	evictiondata_t *evictiondata = calloc(1, sizeof(evictiondata_t));
-	obtainthreshold(300, 5,evictiondata);
-	printf("THRESHOLD ::: %d\n\r", evictiondata->threshold);
-//	const unsigned long long THRESHOLD = 45;
-
+	//Set affinity to the 1st core
 	setcoreaffinity(0);
 
+	//Generate graph to MaxHit MaxMiss Histogram variation
+	//analysehitandmissvariation();
+
+//	const unsigned long long THRESHOLD = 45;
+	evictiondata_t *evictiondata = calloc(1, sizeof(evictiondata_t));
+	const int histogramscale = 5;
+	const int histogramsize = 300;
+	obtainthreshold(histogramsize, histogramscale,evictiondata);
+	printf("THRESHOLD ::: %d\n\r", evictiondata->threshold);
+
+
+	const char *prefix = "LLC";
+	char *dirwithprefix = concat(VARIATION_ANALYSIS_DATA_DIRECTORY, prefix);
+	char *dstfilename = concat(dirwithprefix, "_flush_reload_histogram.data");
+	twoarraystocsvwithstrheaders(dstfilename, "Reload(Hit)",
+			"Flush+Reload(Miss)", histogramscale, histogramsize,
+			evictiondata->hit_counts, evictiondata->miss_counts);
+
+
+
+	//Auto obtain the best delay
 //	autoobtaindelay();
 
 	long int exe_addrs[MAX_ADDRS_TO_MONITOR];
