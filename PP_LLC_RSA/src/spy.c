@@ -32,6 +32,7 @@ typedef struct cache {
 	int mappedsize;
 	int pagemap;
 	int numberofsets;
+	int numberofways;
 	int bitsofoffset;
 	unsigned short int *analysis;
 } cache_t;
@@ -60,7 +61,7 @@ typedef struct datacsvfile {
 	cache_t llcache;
 } datacsvfile_t;
 
-void preparecache(cache_t **llcache, int mappedsize, int numberofsets,
+void preparecache(cache_t **llcache, int mappedsize, int numberofsets, int numberofways,
 		int bitsofoffset) {
 	int i;
 
@@ -68,6 +69,7 @@ void preparecache(cache_t **llcache, int mappedsize, int numberofsets,
 
 	(*llcache)->mappedsize = mappedsize;
 	(*llcache)->numberofsets = numberofsets;
+	(*llcache)->numberofways = numberofways;
 	(*llcache)->bitsofoffset = bitsofoffset;
 	// Map ll cache
 	(*llcache)->cachebasepointer1 = mmap(0, mappedsize,
@@ -241,6 +243,16 @@ unsigned int prime(evictionconfig_t *config, cache_t *llcache, unsigned int set)
 	return evict(config, &(llcache->congaddrs[set]));
 }
 
+void prime1set1way(evictionconfig_t *config, cache_t *cache, unsigned int set){
+
+	if (cache->congaddrs[set].wasaccessed == 0) {
+		getphysicalcongruentaddrs(config, cache, set, NULL);
+	}
+
+	cache->congaddrs->virtualaddrs[cache->numberofways/2];
+
+}
+
 unsigned int probe(evictionconfig_t *config, cache_t *llcache, unsigned int set) {
 
 	//Begin measuring time
@@ -267,10 +279,9 @@ unsigned int probe(evictionconfig_t *config, cache_t *llcache, unsigned int set)
 
 void obtainevictiondata(int mappedsize, int evictionsetsize, int sameeviction,
 		int congruentvirtualaddrs, int histogramsize, int histogramscale,
-		int maxruns, evictiondata_t *evictiondata, cache_t *llcache,
+		int maxruns, evictiondata_t *evictiondata, cache_t *llcache, cache_t *testcache,
 		evictionconfig_t *config) {
 	unsigned int hits, misses;
-
 	// Preparing histograms
 	const int MID_ARRAY = PAGES_SIZE / 2;
 	evictiondata->hit_counts = calloc(histogramsize, sizeof(unsigned int));
@@ -288,7 +299,7 @@ void obtainevictiondata(int mappedsize, int evictionsetsize, int sameeviction,
 			llcache->bitsofoffset);
 
 	// Preparing for the hit histogram
-	accessway(array + MID_ARRAY);
+	prime1set1way(config,testcache,set);
 
 	// Hit histogram
 	for (i = 0; i < maxruns; ++i) {
@@ -300,13 +311,13 @@ void obtainevictiondata(int mappedsize, int evictionsetsize, int sameeviction,
 	}
 
 	// Preparing for the miss histogram
-	flush(array + MID_ARRAY);
+	prime(config, llcache, set);
 
 	// Miss histogram
 	for (i = 0; i < maxruns; ++i) {
 		prime(config, llcache, set);
 
-		accessway(array + MID_ARRAY);
+		prime1set1way(config,testcache,set);
 
 		unsigned long probetime = probe(config, llcache, set) / histogramscale;
 		evictiondata->miss_counts[
@@ -464,11 +475,13 @@ void analysehitandmissvariation(int numberofsets, int numberofways,
 	int i;
 	unsigned int analysis_array[analysissize][headerssize];
 
-	cache_t *llcache;
+	cache_t *llcache, *testcache;
 	evictionconfig_t *config;
 
-	preparecache(&llcache, mappedsize, numberofsets,
+	preparecache(&llcache, mappedsize, numberofsets,numberofways,
 	CACHE_NR_OF_BITS_OF_OFFSET);
+	preparecache(&testcache, mappedsize, numberofsets,numberofways,
+		CACHE_NR_OF_BITS_OF_OFFSET);
 	prepareevictconfig(&config, evictionsetsize, sameeviction,
 			congruentvirtualaddrs);
 
@@ -481,7 +494,7 @@ void analysehitandmissvariation(int numberofsets, int numberofways,
 		obtainevictiondata(mappedsize, evictionsetsize, sameeviction,
 				congruentvirtualaddrs, /*Histogram size*/histogramsize, /*Histogram scale*/
 				histogramscale,
-				MAX_TIMES_TO_OBTAIN_THRESHOLD, evictiondata, llcache, config);
+				MAX_TIMES_TO_OBTAIN_THRESHOLD, evictiondata, llcache, testcache, config);
 		analysis_array[i][0] = evictiondata->maxhit;
 		analysis_array[i][1] = evictiondata->maxmiss;
 	}
@@ -583,13 +596,13 @@ void evaluate_with_prime_probe(char * filenameprefix, cache_t *cache,
 	arraytocsv(dstfilename2, maxruns, probe_analysis_array);
 }
 
-void evaluate_l1_llc_ram_with_prime_probe() {
+void deprecated_evaluate_l1_llc_ram_with_prime_probe() {
 	cache_t *l1, *llc, *ram;
 	evictionconfig_t *l1_config, *llc_config, *ram_config;
 
 	//Prepare and Map level 1 cache struct
 	int l1mappedsize = 64 * 6 * 64;
-	preparecache(&l1, l1mappedsize, 64, 6);
+	preparecache(&l1, l1mappedsize, 64, 6, 6);
 	prepareevictconfig(&l1_config, 6, 1, 1);
 
 	//***Evaluate to the L1***
@@ -598,7 +611,7 @@ void evaluate_l1_llc_ram_with_prime_probe() {
 
 	//Prepare and Map last level cache struct
 	int llcmappedsize = 1024 * 16 * 64;
-	preparecache(&llc, llcmappedsize, 1024, 6);
+	preparecache(&llc, llcmappedsize, 1024, 16, 6);
 	prepareevictconfig(&llc_config, 16, 1, 1);
 
 	//***Evaluate to the LLC***
@@ -607,7 +620,7 @@ void evaluate_l1_llc_ram_with_prime_probe() {
 
 	//Prepare and Map ram struct
 	int rammappedsize = llcmappedsize * 2;
-	preparecache(&ram, rammappedsize, 1024, 6);
+	preparecache(&ram, rammappedsize, 1024, 16, 6);
 	prepareevictconfig(&ram_config, 16, 1, 1);
 
 	//***Prepare array to the RAM***
@@ -615,42 +628,159 @@ void evaluate_l1_llc_ram_with_prime_probe() {
 	disposecache(ram);
 }
 
-int hitevaluation2(int evictionsize, int sameaccesses, int differentaccesses,int numberofsets, int numberofways, int cachelinesize, int bitsofoffset, int timesmappedsize, evictionconfig_t *config, unsigned int *analysis, int startanalysisidx){
+int hitevaluation_prime_probe(int evictionsize, int sameaccesses,
+		int differentaccesses, int numberofsets, int numberofways,
+		int cachelinesize, int bitsofoffset, int timesmappedsize,
+		unsigned int *analysis, int startanalysisidx) {
 	int i, analysisidx;
 	cache_t *cache;
+	evictionconfig_t *config;
 	int mappedsize = numberofsets * numberofways * cachelinesize
-				* timesmappedsize;
-	preparecache(&cache, mappedsize, numberofsets, bitsofoffset);
+			* timesmappedsize;
+	preparecache(&cache, mappedsize, numberofsets, numberofways,bitsofoffset);
 	prepareevictconfig(&config, evictionsize, sameaccesses, differentaccesses);
 
 //	int auxanalysis;
 	for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
 			++i, ++analysisidx) {
-		prime(config,cache,i);
-		analysis[analysisidx] = probe(config,cache,i);
+		prime(config, cache, i);
+		analysis[analysisidx] = probe(config, cache, i);
 	}
 	return analysisidx + 1;
 }
 
-void evaluate_l1_llc_ram_with_prime_probe() {
+int missevaluation_prime_probe(int evictionsize, int sameaccesses,
+		int differentaccesses, int numberofsets, int numberofways,
+		int cachelinesize, int bitsofoffset, int timesmappedsize,
+		unsigned int *analysis, int startanalysisidx) {
+	int i, analysisidx;
+	cache_t *cache, *testvictim;
+	evictionconfig_t *config;
+	int mappedsize = numberofsets * numberofways * cachelinesize
+			* timesmappedsize;
+	preparecache(&cache, mappedsize, numberofsets, numberofways, bitsofoffset);
+	preparecache(&testvictim, mappedsize, numberofsets, numberofways, bitsofoffset);
 
+	prepareevictconfig(&config, evictionsize, sameaccesses, differentaccesses);
+
+//	int auxanalysis;
+	for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
+			++i, ++analysisidx) {
+		//Prime cache set
+		prime(config, cache, i);
+
+		//VERYGOOD WITH ONE WAY
+		prime1set1way(config, testvictim, i);
+
+		//VERYGOOD BUT ALL WAYS
+		//prime(config, testvictim, i);
+
+		//Probe and measure cache set
+		analysis[analysisidx] = probe(config, cache, i);
+	}
+	return analysisidx + 1;
+}
+
+typedef struct evaluationdata{
+	unsigned int *evaluation;
+	int analysedsize;
+}evaluationdata_t;
+
+evaluationdata_t * evaluate_l1_llc_ram_with_prime_probe(char *filename, int l1evictionsize,
+		int l1sameaccesses, int l1differentaccesses, int llcevictionsize,
+		int llcsameaccesses, int llcdifferentaccesses, int llc2evictionsize,
+		int llc2sameaccesses, int llc2differentaccesses) {
+	evaluationdata_t *evadata = calloc(1, sizeof(evaluationdata_t));
+	int l1nrsets = 64;
+	int l1nrways = 6;
+	int bytescacheline = 64;
+	int bitsofoffset = 6;
+	int llcnrsets = 1024;
+	int llcnrways = 16;
+	unsigned int evaluationsize = l1nrsets + llcnrsets + llcnrsets * 2;
+	evadata->evaluation = mmap(0, evaluationsize * sizeof(unsigned int),
+	PROT_READ | PROT_WRITE, MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	//const char * dstfilename = concat(VARIATION_ANALYSIS_DATA_DIRECTORY,
+	//		filename);
+	if(l1evictionsize != 0){
+		printf("[+] L1\n");
+		evadata->analysedsize = hitevaluation_prime_probe(l1evictionsize, l1sameaccesses,
+				l1differentaccesses, l1nrsets, l1nrways, bytescacheline,
+				bitsofoffset, 1, evadata->evaluation, evadata->analysedsize);
+	}
+	if(llcevictionsize != 0){
+		printf("[+] LLC\n");
+		evadata->analysedsize = hitevaluation_prime_probe(llcevictionsize, llcsameaccesses,
+				llcdifferentaccesses, llcnrsets, llcnrways, bytescacheline,
+				bitsofoffset, 1, evadata->evaluation, evadata->analysedsize);
+	}
+	if(llc2evictionsize != 0){
+		printf("[+] 2*LLC\n");
+		evadata->analysedsize = hitevaluation_prime_probe(llc2evictionsize,
+				llc2sameaccesses, llc2differentaccesses, llcnrsets * 2,
+				llcnrways * 2, bytescacheline, bitsofoffset, 1, evadata->evaluation,
+				evadata->analysedsize);
+	}
+
+	//arraytocsv(dstfilename, analysedsize, evaluation);
+	return evadata;
+}
+
+evaluationdata_t * evaluate_l1_llc_ram_with_prime_access_probe(char *filename, int l1evictionsize,
+		int l1sameaccesses, int l1differentaccesses, int llcevictionsize,
+		int llcsameaccesses, int llcdifferentaccesses, int llc2evictionsize,
+		int llc2sameaccesses, int llc2differentaccesses) {
+	evaluationdata_t *evadata = calloc(1, sizeof(evaluationdata_t));
+	int l1nrsets = 64;
+	int l1nrways = 6;
+	int bytescacheline = 64;
+	int bitsofoffset = 6;
+	int llcnrsets = 1024;
+	int llcnrways = 16;
+	unsigned int evaluationsize = l1nrsets + llcnrsets + llcnrsets * 2;
+	evadata->evaluation = mmap(0, evaluationsize * sizeof(unsigned int),
+	PROT_READ | PROT_WRITE, MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	//const char * dstfilename = concat(VARIATION_ANALYSIS_DATA_DIRECTORY,
+	//		filename);
+	if(l1evictionsize != 0){
+		printf("[+] L1\n");
+		evadata->analysedsize = missevaluation_prime_probe(l1evictionsize, l1sameaccesses,
+				l1differentaccesses, l1nrsets, l1nrways, bytescacheline,
+				bitsofoffset, 1, evadata->evaluation, evadata->analysedsize);
+	}
+	if(llcevictionsize != 0){
+		printf("[+] LLC\n");
+		evadata->analysedsize = missevaluation_prime_probe(llcevictionsize, llcsameaccesses,
+				llcdifferentaccesses, llcnrsets, llcnrways, bytescacheline,
+				bitsofoffset, 1, evadata->evaluation, evadata->analysedsize);
+	}
+	if(llc2evictionsize != 0){
+		printf("[+] 2*LLC\n");
+		evadata->analysedsize = missevaluation_prime_probe(llc2evictionsize,
+				llc2sameaccesses, llc2differentaccesses, llcnrsets * 2,
+				llcnrways * 2, bytescacheline, bitsofoffset, 1, evadata->evaluation,
+				evadata->analysedsize);
+	}
+	//arraytocsv(dstfilename, analysedsize, evaluation);
+	return evadata;
 }
 
 void generatehistogram(char *prefix, int numberofsets, int numberofways,
 		int waysize, int timesmappedsize, int bitsofoffset, int evictionsetsize,
 		int sameeviction, int differentaddrs, int histogramscale,
 		int histogramsize) {
-	cache_t *cache;
+	cache_t *cache, *testvictim;
 	evictionconfig_t *config;
 	int mappedsize = numberofsets * numberofways * waysize * timesmappedsize;
 	evictiondata_t *evictiondata = calloc(1, sizeof(evictiondata_t));
 
-	preparecache(&cache, mappedsize, numberofsets, bitsofoffset);
+	preparecache(&cache, mappedsize, numberofsets, numberofways, bitsofoffset);
 	prepareevictconfig(&config, evictionsetsize, sameeviction, differentaddrs);
+	preparecache(&testvictim, mappedsize, numberofsets, numberofways, bitsofoffset);
 
 	obtainevictiondata(mappedsize, evictionsetsize, sameeviction,
 			differentaddrs, histogramsize, histogramscale,
-			/*maxruns*/MAX_TIMES_TO_OBTAIN_THRESHOLD, evictiondata, cache,
+			/*maxruns*/MAX_TIMES_TO_OBTAIN_THRESHOLD, evictiondata, cache, testvictim,
 			config);
 
 	char *dirwithprefix = concat(VARIATION_ANALYSIS_DATA_DIRECTORY, prefix);
@@ -665,15 +795,40 @@ int main() {
 
 	setcoreaffinity(0);
 
-	const int histogramsize = 10000;
-	const int histogramscale = 5;
-//Uncomment
-	const int evictionsetsize = 16;
-	const int sameeviction = 16;
-	const int differentvirtualaddrs = 16;
-	const int analysissize = 10;
+	//[+]BEGIN Obtain unified graphs L1 Prime+Probe | Prime+Access+Probe
+//	char *dstfilename;
+//	evaluationdata_t *evadata1 = calloc(1,sizeof(evaluationdata_t));
+//	evaluationdata_t *evadata2 = calloc(1,sizeof(evaluationdata_t));
+//
+//	printf("%s","Begin evaluation... L1 Prime+Probe\n");
+//	evadata1 = evaluate_l1_llc_ram_with_prime_probe("l1_14_2_2_prime+probe_evaluation.data",/*L1*/14, 2, 2, /*LLC*/0, 1, 1, /*2LLC*/0, 1, 1);
+//	printf("%s","End evaluation...\n");
+//	printf("%s","Begin evaluation... L1 Prime+Access+Probe\n");
+//	evadata2 = evaluate_l1_llc_ram_with_prime_access_probe("l1_14_2_2_prime+access+probe_evaluation.data",/*L1*/14, 2, 2, /*LLC*/0, 1, 1, /*2LLC*/0, 1, 1);
+//	printf("%s","End evaluation...\n");
+//
+//	dstfilename = concat(VARIATION_ANALYSIS_DATA_DIRECTORY, "l1_14_2_2_prime+probe_evaluation.data");
+//	twoarraystocsvwithstrheaders(dstfilename, "Prime+Probe(Hit)",
+//			"Prime+Access+Probe(Miss)", 1, evadata1->analysedsize,
+//			evadata1->evaluation, evadata2->evaluation);
+	//[+]END Obtain unified graphs L1 Prime+Probe | Prime+Access+Probe
 
-	int i;
+//	printf("%s","Begin evaluation... Prime+Probe\n");
+//	evaluate_l1_llc_ram_with_prime_probe("l1_llc_2llc_prime+probe_evaluation.data",/*L1*/6, 1, 1, /*LLC*/16, 1, 1, /*2LLC*/32, 1, 1);
+//	printf("%s","End evaluation...\n");
+//	printf("%s","Begin evaluation... Prime+Access+Probe\n");
+//	evaluate_l1_llc_ram_with_prime_access_probe("l1_llc_2llc_prime+access+probe_evaluation.data",/*L1*/6, 1, 1, /*LLC*/16, 1, 1, /*2LLC*/32, 1, 1);
+//	printf("%s","End evaluation...\n");
+
+//	const int histogramsize = 10000;
+//	const int histogramscale = 5;
+////Uncomment
+//	const int evictionsetsize = 16;
+//	const int sameeviction = 16;
+//	const int differentvirtualaddrs = 16;
+//	const int analysissize = 10;
+//
+//	int i;
 //	for(i = 16; i < 33; i+=16){
 //		char filename[200]="";
 //		sprintf(filename, "%s%d_%d_%d_%s\0",VARIATION_ANALYSIS_DATA_DIRECTORY,16,8,1,VARIATION_ANALYSIS_DATA_FILENAME);
@@ -752,9 +907,9 @@ int main() {
 //			/*sameeviction*/1, /*differentaddrs*/1, /*histogramscale*/5, /*histogramsize*/1000);
 	generatehistogram("L1", /*numberofsets*/64,
 	/*numberofways*/6, /*waysize*/64, /*timesmappedsize*/1,/*bitsofoffset*/6, /*evictionsetsize*/
-			18,
-			/*sameeviction*/1, /*differentaddrs*/1, /*histogramscale*/5, /*histogramsize*/
-			300);
+	14,
+	/*sameeviction*/2, /*differentaddrs*/2, /*histogramscale*/5, /*histogramsize*/
+	300);
 
 	return 0;
 }

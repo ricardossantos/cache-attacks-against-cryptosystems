@@ -588,19 +588,12 @@ int hitevaluation(int numberofsets, int numberofways, int cachelinesize, int bit
 int missevaluation(int numberofsets, int numberofways, int cachelinesize, int bitsofoffset, int timesmappedsize, unsigned int *analysis, int startanalysisidx) {
 	int i, analysisidx;
 	cache_t *cache, *testvictim;
-	void *victimsetpointer, *array;
 	int mappedsize = numberofsets * numberofways * cachelinesize
 				* timesmappedsize;
 	preparecache(&cache, mappedsize, numberofsets, numberofways, cachelinesize,
 			bitsofoffset);
 	preparecache(&testvictim, mappedsize, numberofsets, numberofways, cachelinesize,
 				bitsofoffset);
-
-	int MIDARRAY = PAGES_SIZE /2;
-	array = mmap(0, PAGES_SIZE, PROT_READ | PROT_WRITE,
-	MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-	if (array == MAP_FAILED)
-		handle_error("mmap");
 
 	//victimsetpointer = getbasecachelineptr(testvictim, i, numberofways/2);
 	for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
@@ -611,8 +604,6 @@ int missevaluation(int numberofsets, int numberofways, int cachelinesize, int bi
 		//VERY GOOD WITH ONE WAY
 		prime1set1wayinthemiddle(testvictim,i);
 		//VERYGOOD BUT ALL WAYS prime(testvictim,i);
-		//BAD accessway(array + i);
-		//BAD accessway(victimsetpointer);
 		analysis[analysisidx] = probe(cache,i);
 	}
 	return analysisidx + 1;
