@@ -117,13 +117,13 @@ void biarraytocsv(char dstfilename[], unsigned int rowsize,
 	fclose(fptr);
 }
 
-void arraytocsv(char dstfilename[], unsigned int rowsize, unsigned int src[]) {
+void arraytocsv(char dstfilename[], int scale, unsigned int rowsize, unsigned int src[]) {
 	FILE* fptr;
 	int i;
 
 	fptr = fopen(dstfilename, "w");
-	for (i = 0; i < rowsize; i++) {
-		fprintf(fptr, "%d,%u\n", i, src[i]);
+	for (i = 0; i < rowsize; ++i) {
+		fprintf(fptr, "%d,%u\n", i*scale, src[i]);
 	}
 	fclose(fptr);
 }

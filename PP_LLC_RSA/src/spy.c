@@ -16,6 +16,7 @@
 #define OUTPUTRAWDATA 1
 
 #define HAVE_MORE_CACHE_MAPPINGS 1
+#define HAVE_MAXRUNS_TO_EVALUATE_HITS 1
 
 typedef struct congruentaddrs {
 	int wasaccessed;
@@ -506,9 +507,49 @@ void analysehitandmissvariation(int numberofsets, int numberofways,
 	disposecache(llcache);
 }
 
-int hitevaluation(int size, unsigned int *analysis, int startanalysisidx) {
-	int i, analysisidx;
-	unsigned long long *basepointer = mmap(0, size, PROT_READ | PROT_WRITE,
+//[2]
+//void hitevaluation(const int maxruns, int increment, int size, unsigned int means[], unsigned int points[][maxruns]) {
+//	int meansidx, sameaccess, basepointeridx;
+//	//unsigned long long *basepointer = calloc(size, sizeof(unsigned long long));
+//
+//	unsigned long long *basepointer = mmap(0, size * sizeof(unsigned long long), PROT_READ | PROT_WRITE, MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+//
+//	//Init to populate pages
+////	for (i = 0; i < size; i += PAGES_SIZE) {
+////		unsigned long long *aux = ((void *) basepointer) + i;
+////		aux[0] = i;
+////	}
+//
+//	printf("BEGIN...\n");
+//
+//	for (meansidx = 0, sameaccess = 0, basepointeridx = 0; basepointeridx < size; ++sameaccess) {
+//
+////		void *aux = ((void *) basepointer) + i;
+////		unsigned long long start = getcurrenttsc();
+////		aux[0];
+////		auxanalysis = getcurrenttsc() - start < UINT_MAX? auxanalysis : UINT_MAX;
+////		analysis[analysisidx] = auxanalysis;
+//		unsigned int aux = timeaccessway(&basepointer[basepointeridx]);
+//		means[meansidx] += aux;
+//		//points[i][sameaccess] = aux;
+//		if(sameaccess == maxruns-1){
+//			//printf("Means idx:: %d \t Basepointer idx:: %d \n",meansidx, basepointeridx);
+//			means[meansidx] = means[meansidx] / maxruns;
+//			++meansidx;
+//			basepointeridx += increment;
+//			sameaccess = 0;
+//		}
+//	}
+//
+//	//Dispose array mmap
+//	//munmap(basepointer, size);
+//
+//	printf("END...\n");
+//}
+
+int TWO_hitevaluation(int size, int maxruns, int increment, unsigned int *analysis, int startanalysisidx) {
+	int i, j, analysisidx;
+	char *basepointer = mmap(0, size, PROT_READ | PROT_WRITE,
 	MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
 	//Init to populate pages
@@ -516,40 +557,148 @@ int hitevaluation(int size, unsigned int *analysis, int startanalysisidx) {
 		unsigned long long *aux = ((void *) basepointer) + i;
 		aux[0] = i;
 	}
-
-//	int auxanalysis;
+#if HAVE_MAXRUNS_TO_EVALUATE_HITS == 0
 	for (i = 0, analysisidx = startanalysisidx; i < size;
-			i += PAGES_SIZE, ++analysisidx) {
-		void *aux = ((void *) basepointer) + i;
-//		unsigned long long start = getcurrenttsc();
-//		aux[0];
-//		auxanalysis = getcurrenttsc() - start < UINT_MAX? auxanalysis : UINT_MAX;
-//		analysis[analysisidx] = auxanalysis;
-		analysis[analysisidx] = timeaccessway(aux);
+			i += increment*3, analysisidx += 3) {
+		analysis[analysisidx] = timeaccessway(((void *) basepointer) + i);
+		analysis[analysisidx+1] = timeaccessway(((void *) basepointer) + (i + increment));
+		analysis[analysisidx+2] = timeaccessway(((void *) basepointer) + (i + (2*increment)));
 	}
-	return analysisidx + 1;
+#endif
+
+#if HAVE_MAXRUNS_TO_EVALUATE_HITS == 1
+	for (i = 0, analysisidx = startanalysisidx; i < size;
+			i += increment*3, analysisidx +=3) {
+
+//		unsigned long long start = getcurrenttsc();
+		for(j = 0; j < maxruns;++j){
+//			accessway(((void *) basepointer) + i);
+			analysis[analysisidx] += timeaccessway(((void *) basepointer) + i);
+			analysis[analysisidx+1] += timeaccessway(((void *) basepointer) + (i + increment));
+			analysis[analysisidx+2] += timeaccessway(((void *) basepointer) + (i + (2*increment)));
+		}
+//		analysis[analysisidx] = (getcurrenttsc() - start) / maxruns;
+		analysis[analysisidx] /= maxruns;
+		analysis[analysisidx+1] /= maxruns;
+		analysis[analysisidx+2] /= maxruns;
+	}
+#endif
+	return analysisidx;
 
 	//Dispose array mmap
 	//munmap(basepointer, size);
 }
 
 //Test L1,LLC and RAM cycles of hits
+void TWO_evaluate_l1_llc_ram() {
+	// 6 WAYS | 64 SETS | 64 BYTES(cacheline)
+	unsigned int l1size = 6 * 64 * 64;
+	// 16 WAYS | 1024 SETS | 64 BYTES(cacheline)
+	unsigned int llcsize = 16 * 1024 * 64;
+	// 2 x LLC SIZE
+	unsigned int ramsize = llcsize * 2;
+	// Size of evaluation array(where the cycles will be stores)
+	unsigned int evaluationsize = l1size + llcsize + ramsize;
+	// Allocate evaluation array(where the cycles will be stores)
+	unsigned int *evaluation = mmap(0, evaluationsize * sizeof(unsigned int),
+	PROT_READ | PROT_WRITE, MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	// File name
+	const char * dstfilename = concat(VARIATION_ANALYSIS_DATA_DIRECTORY,
+			"l1_llc_ram_evaluation.data");
+
+	int analysedsize = 0;
+	int increment = 4096;
+	int maxruns = 10000;
+
+	// Obtain cycles for the L1C
+	analysedsize = TWO_hitevaluation(l1size, maxruns, increment, evaluation, analysedsize);
+	// Obtain cycles for the LLC
+	analysedsize = TWO_hitevaluation(llcsize, maxruns, increment, evaluation, analysedsize);
+	// Obtain cycles for the 2xLLC
+	analysedsize = TWO_hitevaluation(ramsize, maxruns, increment, evaluation, analysedsize);
+
+	// Generate the file to be used by gnuplot
+	arraytocsv(dstfilename, increment, analysedsize, evaluation);
+}
+
+int hitevaluation(int increment, int maxruns, int size, unsigned int *analysis, int startanalysisidx) {
+	int i, j, analysisidx;
+	//unsigned long long *basepointer = calloc(size, sizeof(unsigned long long));
+//	unsigned long long *basepointer = mmap(0, size, PROT_READ | PROT_WRITE,
+//			MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	char basepointer[size];
+	memset(basepointer,0,size);
+
+//	//Init to populate pages
+	for (i = 0; i < size; i += PAGES_SIZE) {
+		unsigned long long *aux = ((void *) basepointer) + i;
+		aux[0] = i;
+	}
+
+	for (i = 0, analysisidx = startanalysisidx; i < size;
+			i += increment, ++analysisidx) {
+		void *aux = ((void *) basepointer) + i;
+		//printf("%X\n",aux);
+		for(j = 0; j < maxruns; ++j){
+			analysis[analysisidx] += timeaccessway(aux);
+		}
+		analysis[analysisidx] /= maxruns;
+	}
+
+	//Dispose array mmap
+	//munmap(basepointer, size);
+	return analysisidx;
+}
+
+//Test L1,LLC and RAM cycles of hits
 void evaluate_l1_llc_ram() {
+	int maxruns = 100000;
+	int increment = 1;
+
 	unsigned int l1size = 6 * 64 * 64;
 	unsigned int llcsize = 16 * 1024 * 64;
 	unsigned int ramsize = llcsize * 2;
 	unsigned int evaluationsize = l1size + llcsize + ramsize;
-	unsigned int *evaluation = mmap(0, evaluationsize * sizeof(unsigned int),
-	PROT_READ | PROT_WRITE, MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
 	const char * dstfilename = concat(VARIATION_ANALYSIS_DATA_DIRECTORY,
 			"l1_llc_ram_evaluation.data");
-	int analysedsize = 0;
-	analysedsize = hitevaluation(l1size, evaluation, analysedsize);
-	analysedsize = hitevaluation(llcsize, evaluation, analysedsize);
-	analysedsize = hitevaluation(ramsize, evaluation, analysedsize);
+	printf("BEGIN...\n");
+	unsigned int *evaluation = calloc(evaluationsize, sizeof(unsigned int));//mmap(0, evaluationsize * sizeof(unsigned int), PROT_READ | PROT_WRITE, MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	unsigned int **points = calloc(maxruns * (evaluationsize/increment), sizeof(unsigned int *));
 
-	arraytocsv(dstfilename, analysedsize, evaluation);
+	int analysedsize = 0;
+	printf("L1\n");
+	analysedsize = hitevaluation(increment,maxruns,l1size, evaluation, analysedsize);
+	printf("LLC\n");
+	analysedsize = hitevaluation(increment,maxruns,llcsize, evaluation, analysedsize);
+	printf("2*LLC\n");
+	analysedsize = hitevaluation(increment,maxruns,ramsize, evaluation, analysedsize);
+
+	arraytocsv(dstfilename, /*increment*/1, analysedsize, evaluation);
+	printf("END...\n");
 }
+
+//[1] Test L1,LLC and RAM cycles of hits
+//[1] TODO: UNDO BEFORE TESTING THE COPY OF THE METHOD ABOVE
+//void evaluate_l1_llc_ram() {
+//	int maxruns = 10000;
+//	int increment = 100;
+//
+//	unsigned int l1size = 6 * 64 * 64;
+//	unsigned int llcsize = 16 * 1024 * 64;
+//	unsigned int ramsize = llcsize * 2;
+//	unsigned int evaluationsize = ramsize;
+//
+//	const char * dstfilename = concat(VARIATION_ANALYSIS_DATA_DIRECTORY,
+//			"l1_llc_ram_evaluation.data");
+//	printf("BEGIN...\n");
+//	unsigned int *evaluation = calloc(evaluationsize, sizeof(unsigned int));//mmap(0, evaluationsize * sizeof(unsigned int), PROT_READ | PROT_WRITE, MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+//	unsigned int **points = calloc(maxruns * (evaluationsize/increment), sizeof(unsigned int *));
+//	int finalsize = hitevaluation(increment, maxruns, ramsize, evaluation);
+//
+//	arraytocsv(dstfilename, /*increment*/10, finalsize, evaluation);
+//	printf("END...\n");
+//}
 
 void evaluate_with_prime_probe(char * filenameprefix, cache_t *cache,
 		evictionconfig_t *config) {
@@ -580,7 +729,7 @@ void evaluate_with_prime_probe(char * filenameprefix, cache_t *cache,
 	char * dstfilename2 = concat(dirwithprefix,
 			"_measuring_probes_prime_probe_evaluation.data");
 //	arraytocsv(dstfilename1, maxruns, prime_analysis_array);
-	arraytocsv(dstfilename2, maxruns, probe_analysis_array);
+	arraytocsv(dstfilename2, 1,maxruns, probe_analysis_array);
 
 	//Generate "Prime+Access_arrayl1+Probe" line to the L1
 	for (i = 0; i < maxruns; ++i) {
@@ -593,7 +742,7 @@ void evaluate_with_prime_probe(char * filenameprefix, cache_t *cache,
 	dstfilename2 = concat(dirwithprefix,
 			"_measuring_probes_prime_access_probe_evaluation.data");
 //	arraytocsv(dstfilename1, maxruns, prime_analysis_array);
-	arraytocsv(dstfilename2, maxruns, probe_analysis_array);
+	arraytocsv(dstfilename2, 1,maxruns, probe_analysis_array);
 }
 
 void deprecated_evaluate_l1_llc_ram_with_prime_probe() {
@@ -795,6 +944,8 @@ int main() {
 
 	setcoreaffinity(0);
 
+	TWO_evaluate_l1_llc_ram();
+
 	//[+]BEGIN Obtain unified graphs L1 Prime+Probe | Prime+Access+Probe
 //	char *dstfilename;
 //	evaluationdata_t *evadata1 = calloc(1,sizeof(evaluationdata_t));
@@ -905,11 +1056,15 @@ int main() {
 //	generatehistogram("LLC", /*numberofsets*/1024,
 //			/*numberofways*/16, /*waysize*/64, /*timesmappedsize*/3, /*bitsofoffset*/6, /*evictionsetsize*/30,
 //			/*sameeviction*/1, /*differentaddrs*/1, /*histogramscale*/5, /*histogramsize*/1000);
-	generatehistogram("L1", /*numberofsets*/64,
-	/*numberofways*/6, /*waysize*/64, /*timesmappedsize*/1,/*bitsofoffset*/6, /*evictionsetsize*/
-	14,
-	/*sameeviction*/2, /*differentaddrs*/2, /*histogramscale*/5, /*histogramsize*/
-	300);
+//	generatehistogram("L1", /*numberofsets*/64,
+//	/*numberofways*/6, /*waysize*/64, /*timesmappedsize*/1,/*bitsofoffset*/6, /*evictionsetsize*/
+//	14,
+//	/*sameeviction*/2, /*differentaddrs*/2, /*histogramscale*/5, /*histogramsize*/
+//	300);
 
 	return 0;
 }
+
+
+
+

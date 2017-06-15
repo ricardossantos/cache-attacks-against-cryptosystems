@@ -633,7 +633,7 @@ void evaluate_l1_llc_ram_with_prime_probe() {
 	analysedsize = hitevaluation(llcnrsets,llcnrways,bytescacheline,bitsofoffset,1, evaluation, analysedsize);
 	analysedsize = hitevaluation(llcnrsets*2,llcnrways*2,bytescacheline,bitsofoffset,1, evaluation, analysedsize);
 
-	arraytocsv(dstfilename, analysedsize, evaluation);
+	arraytocsv(dstfilename, 1, analysedsize, evaluation);
 }
 
 //Test L1,LLC and RAM cycles of misses
@@ -657,7 +657,7 @@ void evaluate_l1_llc_ram_with_prime_access_probe() {
 	analysedsize = missevaluation(llcnrsets,llcnrways,bytescacheline,bitsofoffset,1, evaluation, analysedsize);
 	analysedsize = missevaluation(llcnrsets*2,llcnrways*2,bytescacheline,bitsofoffset,1, evaluation, analysedsize);
 
-	arraytocsv(dstfilename, analysedsize, evaluation);
+	arraytocsv(dstfilename, 1,analysedsize, evaluation);
 }
 
 //To generate the mean graphs
@@ -683,6 +683,103 @@ float standarddeviation(const float mean, const unsigned int *data, const int si
 
 float coefficientvariation(float sdev,float mean){
 	return (sdev/mean)*100;
+}
+
+int TWO_hitevaluation(int numberofsets, int numberofways, int cachelinesize, int bitsofoffset, int timesmappedsize, int maxruns, unsigned int *analysis, int startanalysisidx) {
+	int i, j, analysisidx;
+
+	cache_t *cache;
+	void *basepointer;
+	int size = numberofsets * numberofways * cachelinesize
+				* timesmappedsize;
+	preparecache(&cache, size, numberofsets, numberofways, cachelinesize,
+			bitsofoffset);
+
+	basepointer = getbasecachelineptr(cache, 0, 0);
+	int ways;
+
+	//Init to populate pages
+	for (i = 0; i < numberofsets; i += 1) {
+		ways = numberofways;
+		while(ways--){
+			unsigned long long *aux = ((void *) basepointer);
+			aux[0] = i;
+			basepointer = (*(void **) basepointer);
+		}
+	}
+
+#if HAVE_MAXRUNS_TO_EVALUATE_HITS == 0
+	for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
+			i += 1, analysisidx += 3) {
+		ways = numberofways;
+		while(ways--){
+			analysis[analysisidx] = timeaccessway(((void *) basepointer));
+			basepointer = (*(void **) basepointer);
+			analysis[analysisidx+1] = timeaccessway(((void *) basepointer));
+			basepointer = (*(void **) basepointer);
+			analysis[analysisidx+2] = timeaccessway(((void *) basepointer));
+			basepointer = (*(void **) basepointer);
+		}
+	}
+#endif
+
+#if HAVE_MAXRUNS_TO_EVALUATE_HITS == 1
+	for(j = 0; j < maxruns; ++j){
+		for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
+				i += 1, analysisidx += 3) {
+			ways = numberofways;
+			while(ways--){
+				analysis[analysisidx] += timeaccessway(((void *) basepointer));
+				basepointer = (*(void **) basepointer);
+				analysis[analysisidx+1] += timeaccessway(((void *) basepointer) );
+				basepointer = (*(void **) basepointer);
+				analysis[analysisidx+2] += timeaccessway(((void *) basepointer) );
+				basepointer = (*(void **) basepointer);
+			}
+		}
+	}
+	for (i = 0; i < analysisidx; i += 3) {
+		analysis[i] /= maxruns;
+		analysis[i+1] /= maxruns;
+		analysis[i+2] /= maxruns;
+	}
+#endif
+	return analysisidx;
+
+	//Dispose array mmap
+	//munmap(basepointer, size);
+}
+
+//Test L1,LLC and RAM cycles of hits
+void TWO_evaluate_l1_llc_ram() {
+	// 6 WAYS | 64 SETS | 64 BYTES(cacheline)
+	unsigned int l1size = 6 * 64 * 64;
+	// 16 WAYS | 1024 SETS | 64 BYTES(cacheline)
+	unsigned int llcsize = 16 * 1024 * 64;
+	// 2 x LLC SIZE
+	unsigned int ramsize = llcsize * 2;
+	// Size of evaluation array(where the cycles will be stores)
+	unsigned int evaluationsize = l1size + llcsize + ramsize;
+	// Allocate evaluation array(where the cycles will be stores)
+	unsigned int *evaluation = mmap(0, evaluationsize * sizeof(unsigned int),
+	PROT_READ | PROT_WRITE, MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	// File name
+	const char * dstfilename = concat(VARIATION_ANALYSIS_DATA_DIRECTORY,
+			"l1_llc_ram_evaluation.data");
+
+	int analysedsize = 0;
+	int increment = 4096;
+	int maxruns = 10000;
+
+	// Obtain cycles for the L1C
+	analysedsize = TWO_hitevaluation(/*numberofsets*/64,/*numberofways*/6,/*cachelinesize*/64,/*bitsofoffset*/6,/*timesmappedsize*/1, maxruns, evaluation, analysedsize);
+	// Obtain cycles for the LLC
+	analysedsize = TWO_hitevaluation(/*numberofsets*/1024,/*numberofways*/16,/*cachelinesize*/64,/*bitsofoffset*/6,/*timesmappedsize*/1, maxruns, evaluation, analysedsize);
+	// Obtain cycles for the 2xLLC
+	analysedsize = TWO_hitevaluation(/*numberofsets*/1024,/*numberofways*/16,/*cachelinesize*/64,/*bitsofoffset*/6,/*timesmappedsize*/2, maxruns, evaluation, analysedsize);
+
+	// Generate the file to be used by gnuplot
+	arraytocsv(dstfilename, increment, analysedsize, evaluation);
 }
 
 int main() {
