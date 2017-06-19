@@ -19,6 +19,8 @@
 #define VARIATION_ANALYSIS_DATA_DIRECTORY "/home/root/thesis-code/"
 #define SCAN_CACHE_DATA_DIRECTORY "/home/root/thesis-code/scan/"
 #define RANDOMIZESETPTRS 0
+#define HAVE_MAXRUNS_TO_EVALUATE_HITS 1
+
 #define handle_error(msg) \
 	do { perror(msg); exit(EXIT_FAILURE); } while (0)
 
@@ -699,52 +701,62 @@ int TWO_hitevaluation(int numberofsets, int numberofways, int cachelinesize, int
 	int ways;
 
 	//Init to populate pages
-	for (i = 0; i < numberofsets; i += 1) {
-		ways = numberofways;
-		while(ways--){
-			unsigned long long *aux = ((void *) basepointer);
-			aux[0] = i;
-			basepointer = (*(void **) basepointer);
-		}
-	}
+//	for (i = 0; i < numberofsets; i += 1) {
+//		ways = numberofways;
+//		while(ways--){
+//			unsigned long long *aux = ((void *) basepointer);
+//			//aux[3] = i;
+//			basepointer = (*(void **) basepointer);
+//		}
+//	}
+
 
 #if HAVE_MAXRUNS_TO_EVALUATE_HITS == 0
 	for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
-			i += 1, analysisidx += 3) {
+			i += 1) {
 		ways = numberofways;
-		while(ways--){
+		while(ways){
 			analysis[analysisidx] = timeaccessway(((void *) basepointer));
 			basepointer = (*(void **) basepointer);
 			analysis[analysisidx+1] = timeaccessway(((void *) basepointer));
 			basepointer = (*(void **) basepointer);
 			analysis[analysisidx+2] = timeaccessway(((void *) basepointer));
 			basepointer = (*(void **) basepointer);
+			analysisidx += 3;
+			ways-=3;
 		}
 	}
 #endif
 
 #if HAVE_MAXRUNS_TO_EVALUATE_HITS == 1
-	for(j = 0; j < maxruns; ++j){
-		for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
-				i += 1, analysisidx += 3) {
-			ways = numberofways;
-			while(ways--){
-				analysis[analysisidx] += timeaccessway(((void *) basepointer));
-				basepointer = (*(void **) basepointer);
-				analysis[analysisidx+1] += timeaccessway(((void *) basepointer) );
-				basepointer = (*(void **) basepointer);
-				analysis[analysisidx+2] += timeaccessway(((void *) basepointer) );
-				basepointer = (*(void **) basepointer);
+	void *auxptr1, *auxptr2, *auxptr3;
+	//printf("%X\n",basepointer);
+	for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
+			i += 1) {
+		ways = numberofways;
+		while(ways){
+			auxptr1 = basepointer;
+			printf("%X",basepointer);
+			auxptr2 = (*(void **) basepointer);
+			printf("%X",basepointer);
+			auxptr3 = (*(void **) basepointer);
+			printf("%X",basepointer);
+			for(j = 0; j < maxruns; ++j){
+				analysis[analysisidx] += timeaccessway(auxptr1);
+				analysis[analysisidx+1] += timeaccessway(auxptr2);
+				analysis[analysisidx+2] += timeaccessway(auxptr3);
 			}
+			analysis[analysisidx] /= maxruns;
+			analysis[analysisidx+1] /= maxruns;
+			analysis[analysisidx+2] /= maxruns;
+
+			basepointer = auxptr3;
+			analysisidx += 3;
+			ways -=3;
 		}
 	}
-	for (i = 0; i < analysisidx; i += 3) {
-		analysis[i] /= maxruns;
-		analysis[i+1] /= maxruns;
-		analysis[i+2] /= maxruns;
-	}
 #endif
-	return analysisidx;
+	return analysisidx-3;
 
 	//Dispose array mmap
 	//munmap(basepointer, size);
@@ -757,7 +769,7 @@ void TWO_evaluate_l1_llc_ram() {
 	// 16 WAYS | 1024 SETS | 64 BYTES(cacheline)
 	unsigned int llcsize = 16 * 1024 * 64;
 	// 2 x LLC SIZE
-	unsigned int ramsize = llcsize * 2;
+	unsigned int ramsize = (16*2) * (1024*2) * 64;
 	// Size of evaluation array(where the cycles will be stores)
 	unsigned int evaluationsize = l1size + llcsize + ramsize;
 	// Allocate evaluation array(where the cycles will be stores)
@@ -768,15 +780,15 @@ void TWO_evaluate_l1_llc_ram() {
 			"l1_llc_ram_evaluation.data");
 
 	int analysedsize = 0;
-	int increment = 4096;
+	int increment = 64;
 	int maxruns = 10000;
 
 	// Obtain cycles for the L1C
-	analysedsize = TWO_hitevaluation(/*numberofsets*/64,/*numberofways*/6,/*cachelinesize*/64,/*bitsofoffset*/6,/*timesmappedsize*/1, maxruns, evaluation, analysedsize);
+	//analysedsize = TWO_hitevaluation(/*numberofsets*/64,/*numberofways*/6,/*cachelinesize*/64,/*bitsofoffset*/6,/*timesmappedsize*/1, maxruns, evaluation, analysedsize);
 	// Obtain cycles for the LLC
-	analysedsize = TWO_hitevaluation(/*numberofsets*/1024,/*numberofways*/16,/*cachelinesize*/64,/*bitsofoffset*/6,/*timesmappedsize*/1, maxruns, evaluation, analysedsize);
+	//analysedsize = TWO_hitevaluation(/*numberofsets*/1024,/*numberofways*/16,/*cachelinesize*/64,/*bitsofoffset*/6,/*timesmappedsize*/1, maxruns, evaluation, analysedsize);
 	// Obtain cycles for the 2xLLC
-	analysedsize = TWO_hitevaluation(/*numberofsets*/1024,/*numberofways*/16,/*cachelinesize*/64,/*bitsofoffset*/6,/*timesmappedsize*/2, maxruns, evaluation, analysedsize);
+	analysedsize = TWO_hitevaluation(/*numberofsets*/1024,/*numberofways*/26,/*cachelinesize*/64,/*bitsofoffset*/6,/*timesmappedsize*/1, maxruns, evaluation, analysedsize);
 
 	// Generate the file to be used by gnuplot
 	arraytocsv(dstfilename, increment, analysedsize, evaluation);
@@ -784,12 +796,18 @@ void TWO_evaluate_l1_llc_ram() {
 
 int main() {
 
+	setcoreaffinity(0);
+
+	//Evaluate Hits
+	TWO_evaluate_l1_llc_ram();
+
 	//Evaluate Prime+Probe
-	evaluate_l1_llc_ram_with_prime_probe();
+	//evaluate_l1_llc_ram_with_prime_probe();
 
 	//Evaluate Prime+Access+Probe
 	//evaluate_l1_llc_ram_with_prime_access_probe();
 
+	//Generate histograms
 //	generatehistogram("LLC", /*numberofsets*/1024,
 //	/*numberofways*/16, /*cachelinesize*/64, /*timesmappedsize*/1, /*bitsofoffset*/
 //	6, /*histogramscale*/
@@ -800,25 +818,80 @@ int main() {
 //			5, /*histogramsize*/
 //			300);
 
-	cache_t *cache;
-	evictiondata_t *evictiondata;
-	int mappedsize, maxruns;
+	//SCAN SETS
+//	cache_t *cache;
+//	evictiondata_t *evictiondata;
+//	int mappedsize, maxruns;
+////
+////	const int histogramsize = 300;
+////	const int histogramscale = 5;
+////
+//	const int numberofsets = 1024;
+//	const int numberofways = 16;
+//	const int cachelinesize = 64;
+//	const int bitsofoffset = 6;
 //
-//	const int histogramsize = 300;
-//	const int histogramscale = 5;
+//	// Paper Cache-access pattern attack on disaligned AES t-tables
+//	// (3/4)^(4*3) = 1.367% probability LLC not being totally evicted
+//	mappedsize = numberofsets * numberofways * cachelinesize;
 //
-	const int numberofsets = 1024;
-	const int numberofways = 16;
-	const int cachelinesize = 64;
-	const int bitsofoffset = 6;
+//	maxruns = 5000;
+//	evictiondata = calloc(1, sizeof(evictiondata_t));
+//
+//	waitforvictim_t *waitforvictim;
+//	int setidx;
+//
+//	preparecache(&cache, mappedsize, numberofsets, numberofways, cachelinesize,
+//			bitsofoffset);
+//	preparewaitforactivity(&waitforvictim);
+//
+//	//For N files
+//	const int cyclestartidx = 0;
+//	const int cycleincrement = 1;
+//	char *nfilename;
+//	float *means = calloc(numberofsets, sizeof(float));
+//	float *standarddeviations = calloc(numberofsets, sizeof(float));
+//	float *coefficientevariations = calloc(numberofsets, sizeof(float));
+//	for (setidx = 0; setidx < numberofsets; ++setidx) {
+//		printf("\nWaiting for activity...\n");
+//
+//		waitforvictimactivity(waitforvictim);
+//
+//		//int setidx = 1;
+//		printf("Analyse set number: %d\n", setidx);
+//		//For 1 file
+//		//analysellc(setidx, cache->numberofsets, setidx, cache, MAX_TIMES_TO_CSV * numberofsets);
+//
+//		//For N files
+//		analysellc(cyclestartidx, cycleincrement, setidx, cache, MAX_TIMES_TO_CSV);
+//		sprintf(nfilename, "%d", setidx);
+//		nfilename = concat(concat(SCAN_CACHE_DATA_DIRECTORY, concat("SET_",nfilename)), "_prime_probe.data");
+//		//arraytocsv(nfilename, MAX_TIMES_TO_CSV, cache->analysis);
+//
+//		means[setidx] = mean(cache->analysis, MAX_TIMES_TO_CSV);
+//		standarddeviations[setidx] = standarddeviation(means[setidx], cache->analysis, MAX_TIMES_TO_CSV);
+//		coefficientevariations[setidx] = coefficientvariation(standarddeviations[setidx],means[setidx]);
+//
+//		//delay
+//		sleep(1);
+//	}
+//
+//	nfilename = concat(concat(SCAN_CACHE_DATA_DIRECTORY, "MEANS_"), "_prime_probe.data");
+//	logsetsstatistic(nfilename,means,numberofsets);
+//
+//	nfilename = concat(concat(SCAN_CACHE_DATA_DIRECTORY, "STANDARD_DEVIATIONS_"), "_prime_probe.data");
+//	logsetsstatistic(nfilename,standarddeviations,numberofsets);
+//
+//	nfilename = concat(concat(SCAN_CACHE_DATA_DIRECTORY, "COEFFICIENT_VARIATIONS_"), "_prime_probe.data");
+//	logsetsstatistic(nfilename,coefficientevariations,numberofsets);
+//	//For 1 file
+//	//arraytodatafilewithoutlabels(PROBE_ANALYSIS_DATA_FILENAME, cache->analysis,
+//	//MAX_TIMES_TO_CSV, numberofsets);
+//
+//	disposecache(cache);
 
-	// Paper Cache-access pattern attack on disaligned AES t-tables
-	// (3/4)^(4*3) = 1.367% probability LLC not being totally evicted
-	mappedsize = numberofsets * numberofways * cachelinesize;
 
-	maxruns = 5000;
-	evictiondata = calloc(1, sizeof(evictiondata_t));
-
+	//OBTAIN EVICTION DATA
 //	preparecache(&cache, mappedsize, numberofsets, numberofways,
 //			cachelinesize, bitsofoffset);
 //
@@ -842,56 +915,5 @@ int main() {
 //		printf("Eviction Rate: %lf\%\n", evictiondata->evictionrate);
 //	}
 //
-	waitforvictim_t *waitforvictim;
-	int setidx;
-
-	preparecache(&cache, mappedsize, numberofsets, numberofways, cachelinesize,
-			bitsofoffset);
-	preparewaitforactivity(&waitforvictim);
-
-	//For N files
-	const int cyclestartidx = 0;
-	const int cycleincrement = 1;
-	char *nfilename;
-	float *means = calloc(numberofsets, sizeof(float));
-	float *standarddeviations = calloc(numberofsets, sizeof(float));
-	float *coefficientevariations = calloc(numberofsets, sizeof(float));
-	for (setidx = 0; setidx < numberofsets; ++setidx) {
-		printf("\nWaiting for activity...\n");
-
-		waitforvictimactivity(waitforvictim);
-
-		//int setidx = 1;
-		printf("Analyse set number: %d\n", setidx);
-		//For 1 file
-		//analysellc(setidx, cache->numberofsets, setidx, cache, MAX_TIMES_TO_CSV * numberofsets);
-
-		//For N files
-		analysellc(cyclestartidx, cycleincrement, setidx, cache, MAX_TIMES_TO_CSV);
-		sprintf(nfilename, "%d", setidx);
-		nfilename = concat(concat(SCAN_CACHE_DATA_DIRECTORY, concat("SET_",nfilename)), "_prime_probe.data");
-		//arraytocsv(nfilename, MAX_TIMES_TO_CSV, cache->analysis);
-
-		means[setidx] = mean(cache->analysis, MAX_TIMES_TO_CSV);
-		standarddeviations[setidx] = standarddeviation(means[setidx], cache->analysis, MAX_TIMES_TO_CSV);
-		coefficientevariations[setidx] = coefficientvariation(standarddeviations[setidx],means[setidx]);
-
-		//delay
-		sleep(1);
-	}
-
-	nfilename = concat(concat(SCAN_CACHE_DATA_DIRECTORY, "MEANS_"), "_prime_probe.data");
-	logsetsstatistic(nfilename,means,numberofsets);
-
-	nfilename = concat(concat(SCAN_CACHE_DATA_DIRECTORY, "STANDARD_DEVIATIONS_"), "_prime_probe.data");
-	logsetsstatistic(nfilename,standarddeviations,numberofsets);
-
-	nfilename = concat(concat(SCAN_CACHE_DATA_DIRECTORY, "COEFFICIENT_VARIATIONS_"), "_prime_probe.data");
-	logsetsstatistic(nfilename,coefficientevariations,numberofsets);
-	//For 1 file
-	//arraytodatafilewithoutlabels(PROBE_ANALYSIS_DATA_FILENAME, cache->analysis,
-	//MAX_TIMES_TO_CSV, numberofsets);
-
-	disposecache(cache);
 	return 0;
 }
