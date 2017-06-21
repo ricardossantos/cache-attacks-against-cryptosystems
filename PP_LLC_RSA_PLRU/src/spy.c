@@ -687,8 +687,12 @@ float coefficientvariation(float sdev,float mean){
 	return (sdev/mean)*100;
 }
 
-int TWO_hitevaluation(int numberofsets, int numberofways, int cachelinesize, int bitsofoffset, int timesmappedsize, int maxruns, unsigned int *analysis, int startanalysisidx) {
-	int i, j, analysisidx;
+
+#define accessptr(addr) \
+	asm volatile("mov (%0), %%eax\n":: "r" (addr): "%eax");
+
+int TWO_hitevaluation(int numberofsets, int numberofways, int cachelinesize, int bitsofoffset, int timesmappedsize, int analyzedsize, int maxruns, int sizeofanalysisarray, unsigned int *analysis, int startanalysisidx) {
+	int i, j;
 
 	cache_t *cache;
 	void *basepointer;
@@ -700,66 +704,23 @@ int TWO_hitevaluation(int numberofsets, int numberofways, int cachelinesize, int
 	basepointer = getbasecachelineptr(cache, 0, 0);
 	int ways;
 
-	//Init to populate pages
-//	for (i = 0; i < numberofsets; i += 1) {
-//		ways = numberofways;
-//		while(ways--){
-//			unsigned long long *aux = ((void *) basepointer);
-//			//aux[3] = i;
-//			basepointer = (*(void **) basepointer);
-//		}
-//	}
-
-
-#if HAVE_MAXRUNS_TO_EVALUATE_HITS == 0
-	for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
-			i += 1) {
-		ways = numberofways;
-		while(ways){
-			analysis[analysisidx] = timeaccessway(((void *) basepointer));
-			basepointer = (*(void **) basepointer);
-			analysis[analysisidx+1] = timeaccessway(((void *) basepointer));
-			basepointer = (*(void **) basepointer);
-			analysis[analysisidx+2] = timeaccessway(((void *) basepointer));
-			basepointer = (*(void **) basepointer);
-			analysisidx += 3;
-			ways-=3;
-		}
-	}
-#endif
-
-#if HAVE_MAXRUNS_TO_EVALUATE_HITS == 1
-	void *auxptr1, *auxptr2, *auxptr3;
-	//printf("%X\n",basepointer);
-	for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
-			i += 1) {
-		ways = numberofways;
-		while(ways){
-			auxptr1 = basepointer;
-			printf("%X",basepointer);
-			auxptr2 = (*(void **) basepointer);
-			printf("%X",basepointer);
-			auxptr3 = (*(void **) basepointer);
-			printf("%X",basepointer);
-			for(j = 0; j < maxruns; ++j){
-				analysis[analysisidx] += timeaccessway(auxptr1);
-				analysis[analysisidx+1] += timeaccessway(auxptr2);
-				analysis[analysisidx+2] += timeaccessway(auxptr3);
+	unsigned int averageaccestime = 0, idxanalyzed = 0;
+	unsigned long long start;
+	for( idxanalyzed = startanalysisidx; idxanalyzed < sizeofanalysisarray; ++idxanalyzed) {
+		printf( "Idxanalyzed: %d\n", idxanalyzed);
+		start = getcurrenttsc();
+		for(j = 0; j < maxruns;++j){
+			for(i = 0; i < numberofsets*numberofways/*analyzedsize*/; i+=1){
+				accessptr(basepointer);
+				basepointer = (*(void **) basepointer);
 			}
-			analysis[analysisidx] /= maxruns;
-			analysis[analysisidx+1] /= maxruns;
-			analysis[analysisidx+2] /= maxruns;
-
-			basepointer = auxptr3;
-			analysisidx += 3;
-			ways -=3;
 		}
+		averageaccestime = (getcurrenttsc() - start) / (maxruns*(numberofsets*numberofways/*analyzedsize*/));
+		analysis[idxanalyzed] = averageaccestime;
 	}
-#endif
-	return analysisidx-3;
 
-	//Dispose array mmap
-	//munmap(basepointer, size);
+	return idxanalyzed;
+
 }
 
 //Test L1,LLC and RAM cycles of hits
@@ -779,19 +740,23 @@ void TWO_evaluate_l1_llc_ram() {
 	const char * dstfilename = concat(VARIATION_ANALYSIS_DATA_DIRECTORY,
 			"l1_llc_ram_evaluation.data");
 
-	int analysedsize = 0;
+	int initialidx = 0;
 	int increment = 64;
 	int maxruns = 10000;
+	int analyzedsize = 64*6; //(L1 sets * L1 ways)
+	int sizeofanalysisarray = 50;
 
 	// Obtain cycles for the L1C
-	//analysedsize = TWO_hitevaluation(/*numberofsets*/64,/*numberofways*/6,/*cachelinesize*/64,/*bitsofoffset*/6,/*timesmappedsize*/1, maxruns, evaluation, analysedsize);
+	initialidx = TWO_hitevaluation(/*numberofsets*/64,/*numberofways*/6,/*cachelinesize*/64,/*bitsofoffset*/6,/*timesmappedsize*/1, analyzedsize, maxruns, initialidx+sizeofanalysisarray, evaluation, initialidx);
 	// Obtain cycles for the LLC
-	//analysedsize = TWO_hitevaluation(/*numberofsets*/1024,/*numberofways*/16,/*cachelinesize*/64,/*bitsofoffset*/6,/*timesmappedsize*/1, maxruns, evaluation, analysedsize);
+	initialidx = TWO_hitevaluation(/*numberofsets*/1024,/*numberofways*/16,/*cachelinesize*/64,/*bitsofoffset*/6,/*timesmappedsize*/1, analyzedsize, maxruns, initialidx+sizeofanalysisarray, evaluation, initialidx);
 	// Obtain cycles for the 2xLLC
-	analysedsize = TWO_hitevaluation(/*numberofsets*/1024,/*numberofways*/26,/*cachelinesize*/64,/*bitsofoffset*/6,/*timesmappedsize*/1, maxruns, evaluation, analysedsize);
+	initialidx = TWO_hitevaluation(/*numberofsets*/1024,/*numberofways*/26,/*cachelinesize*/64,/*bitsofoffset*/6,/*timesmappedsize*/1, analyzedsize, maxruns, initialidx+sizeofanalysisarray, evaluation, initialidx);
+
+	int scale = 1;
 
 	// Generate the file to be used by gnuplot
-	arraytocsv(dstfilename, increment, analysedsize, evaluation);
+	arraytocsv(dstfilename, scale, initialidx, evaluation);
 }
 
 int main() {
@@ -799,13 +764,13 @@ int main() {
 	setcoreaffinity(0);
 
 	//Evaluate Hits
-	TWO_evaluate_l1_llc_ram();
+	//TWO_evaluate_l1_llc_ram();
 
 	//Evaluate Prime+Probe
-	//evaluate_l1_llc_ram_with_prime_probe();
+	evaluate_l1_llc_ram_with_prime_probe();
 
 	//Evaluate Prime+Access+Probe
-	//evaluate_l1_llc_ram_with_prime_access_probe();
+	evaluate_l1_llc_ram_with_prime_access_probe();
 
 	//Generate histograms
 //	generatehistogram("LLC", /*numberofsets*/1024,
