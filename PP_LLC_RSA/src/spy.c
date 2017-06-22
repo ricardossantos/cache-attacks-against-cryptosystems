@@ -1642,10 +1642,8 @@ void TWO_evaluate_l1_llc_ram() {
 	unsigned int l1size = 6 * 64 * 64;
 	// 16 WAYS | 1024 SETS | 64 BYTES(cacheline)
 	unsigned int llcsize = 16 * 1024 * 64;
-	// 2 x LLC SIZE
-	unsigned int ramsize = llcsize * 2;
 	// Size of evaluation array(where the cycles will be stores)
-	unsigned int evaluationsize = l1size + llcsize + ramsize;
+	unsigned int evaluationsize = (l1size/2) + (l1size*(2/3)) + (l1size+1) + (llcsize/2) + (llcsize-1) + (llcsize+1) + (llcsize*2) + (llcsize*3);
 	// Allocate evaluation array(where the cycles will be stores)
 	unsigned int *evaluation = mmap(0, evaluationsize * sizeof(unsigned int),
 	PROT_READ | PROT_WRITE, MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -1655,15 +1653,26 @@ void TWO_evaluate_l1_llc_ram() {
 
 	int analysedsize = 0;
 	int increment = 1;
-	int maxruns = 10000;
-	int sizeofevaluation = 50;
+	int maxruns = 100;
+	int sizeofevaluation = 2;
 
-	// Obtain cycles for the L1C
-	analysedsize = depois_de_email_19_06_2017_TWO_hitevaluation(l1size, l1size, maxruns, increment, sizeofevaluation+analysedsize, evaluation, analysedsize);
-	// Obtain cycles for the LLC
-	analysedsize = depois_de_email_19_06_2017_TWO_hitevaluation(llcsize, l1size, maxruns, increment, sizeofevaluation+analysedsize, evaluation, analysedsize);
+
+	// Obtain cycles for the L1C/2
+	analysedsize = depois_de_email_19_06_2017_TWO_hitevaluation(l1size/2, l1size/2, maxruns, increment, sizeofevaluation+analysedsize, evaluation, analysedsize);
+	// Obtain cycles for the L1C*2/3
+	analysedsize = depois_de_email_19_06_2017_TWO_hitevaluation((l1size*0.6), (l1size*0.6), maxruns, increment, sizeofevaluation+analysedsize, evaluation, analysedsize);
+	// Obtain cycles for the L1C+1
+	analysedsize = depois_de_email_19_06_2017_TWO_hitevaluation(l1size+1, l1size+1, maxruns, increment, sizeofevaluation+analysedsize, evaluation, analysedsize);
+	// Obtain cycles for the LLC/2
+	analysedsize = depois_de_email_19_06_2017_TWO_hitevaluation(llcsize/2, llcsize/2, maxruns, increment, sizeofevaluation+analysedsize, evaluation, analysedsize);
+	// Obtain cycles for the LLC-1
+	analysedsize = depois_de_email_19_06_2017_TWO_hitevaluation(llcsize-1, llcsize-1, maxruns, increment, sizeofevaluation+analysedsize, evaluation, analysedsize);
+	// Obtain cycles for the LLC+1
+	analysedsize = depois_de_email_19_06_2017_TWO_hitevaluation(llcsize+1, llcsize+1, maxruns, increment, sizeofevaluation+analysedsize, evaluation, analysedsize);
 	// Obtain cycles for the 2xLLC
-	analysedsize = depois_de_email_19_06_2017_TWO_hitevaluation(ramsize, l1size, maxruns, increment, sizeofevaluation+analysedsize, evaluation, analysedsize);
+	analysedsize = depois_de_email_19_06_2017_TWO_hitevaluation(llcsize*2, llcsize*2, maxruns, increment, sizeofevaluation+analysedsize, evaluation, analysedsize);
+	// Obtain cycles for the 2xLLC
+	analysedsize = depois_de_email_19_06_2017_TWO_hitevaluation(llcsize*3, llcsize*3, maxruns, increment, sizeofevaluation+analysedsize, evaluation, analysedsize);
 
 	int scale = 1;
 

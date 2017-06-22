@@ -231,9 +231,9 @@ unsigned int prime1set1wayinthemiddle(cache_t *cache, int set) {
 	return setcycles;
 }
 
-unsigned int prime(cache_t *cache, int set) {
+unsigned long long prime(cache_t *cache, int set) {
 	int way = cache->numberofways;
-	unsigned int setcycles = 0;
+	unsigned long long setcycles = 0;
 	void *setpointer;
 	if (RANDOMIZESETPTRS)
 		setpointer = getbasecachelineptr(cache, cache->randomized[set], 0);
@@ -249,9 +249,9 @@ unsigned int prime(cache_t *cache, int set) {
 	return setcycles;
 }
 
-unsigned int probe(cache_t *cache, int set) {
+unsigned long long probe(cache_t *cache, int set) {
 	int way = cache->numberofways;
-	unsigned int setcycles = 0;
+	unsigned long long setcycles = 0;
 	void *setpointer;
 	if (RANDOMIZESETPTRS)
 		setpointer = getprevcachelineptr(cache, cache->randomized[set],
@@ -259,7 +259,7 @@ unsigned int probe(cache_t *cache, int set) {
 	else
 		setpointer = getprevcachelineptr(cache, set, cache->numberofways - 1);
 	while (way--) {
-		//printf("PROBEWAY 64B: %x\n", setpointer);
+//		printf("PROBEWAY 64B: %x\n", setpointer);
 		setcycles += timeaccessway(setpointer);
 //		printf("PROBE POINTER: %x\n",setpointer);
 		//Transverse the pointer here
@@ -566,29 +566,34 @@ void generatehistogram(char *prefix, int numberofsets, int numberofways,
 	disposecache(cache);
 }
 
-int hitevaluation(int numberofsets, int numberofways, int cachelinesize, int bitsofoffset, int timesmappedsize, unsigned int *analysis, int startanalysisidx) {
-	int i, analysisidx;
+int hitevaluation(int numberofsets, int numberofways, int cachelinesize, int bitsofoffset, int timesmappedsize, int maxruns, unsigned int *analysis, int startanalysisidx) {
+	int i, j, analysisidx;
+	unsigned int averageaccestime;
 	cache_t *cache;
 	int mappedsize = numberofsets * numberofways * cachelinesize
 				* timesmappedsize;
 	preparecache(&cache, mappedsize, numberofsets, numberofways, cachelinesize,
 			bitsofoffset);
 
-
-//	int auxanalysis;
+	for(j = 0; j < maxruns;++j){
+		for (i = 0, analysisidx = startanalysisidx; i < numberofsets;++i, ++analysisidx) {
+			prime(cache,i);
+//			analysis[analysisidx] = probe(cache,i);
+			analysis[analysisidx] += probe(cache,i);
+		}
+	}
 	for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
 			++i, ++analysisidx) {
-		prime(cache,i);
-		analysis[analysisidx] = probe(cache,i);
+		averageaccestime = analysis[analysisidx] / (maxruns);
+		analysis[analysisidx] = averageaccestime;
 	}
-	return analysisidx + 1;
 
-	//Dispose array mmap
-	//munmap(basepointer, size);
+	return analysisidx;
+
 }
 
-int missevaluation(int numberofsets, int numberofways, int cachelinesize, int bitsofoffset, int timesmappedsize, unsigned int *analysis, int startanalysisidx) {
-	int i, analysisidx;
+int missevaluation(int numberofsets, int numberofways, int cachelinesize, int bitsofoffset, int timesmappedsize, int maxruns, unsigned int *analysis, int startanalysisidx) {
+	int i, j, analysisidx, averageaccestime;
 	cache_t *cache, *testvictim;
 	int mappedsize = numberofsets * numberofways * cachelinesize
 				* timesmappedsize;
@@ -597,21 +602,29 @@ int missevaluation(int numberofsets, int numberofways, int cachelinesize, int bi
 	preparecache(&testvictim, mappedsize, numberofsets, numberofways, cachelinesize,
 				bitsofoffset);
 
-	//victimsetpointer = getbasecachelineptr(testvictim, i, numberofways/2);
+	for(j = 0; j < maxruns;++j){
+		for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
+				++i, ++analysisidx) {
+
+			prime(cache,i);
+
+			//VERY GOOD WITH ONE WAY
+			prime1set1wayinthemiddle(testvictim,i);
+			//VERYGOOD BUT ALL WAYS
+			//prime(testvictim,i);
+
+//			analysis[analysisidx] = probe(cache,i);
+			analysis[analysisidx] += probe(cache,i);
+		}
+	}
+
 	for (i = 0, analysisidx = startanalysisidx; i < numberofsets;
 			++i, ++analysisidx) {
-
-		prime(cache,i);
-
-		//VERY GOOD WITH ONE WAY
-		prime1set1wayinthemiddle(testvictim,i);
-		//VERYGOOD BUT ALL WAYS prime(testvictim,i);
-		analysis[analysisidx] = probe(cache,i);
+		averageaccestime = analysis[analysisidx] / (maxruns);
+		analysis[analysisidx] = averageaccestime;
 	}
-	return analysisidx + 1;
 
-	//Dispose array mmap
-	//munmap(basepointer, size);
+	return analysisidx;
 }
 
 //Test L1,LLC and RAM cycles of hits
@@ -631,11 +644,17 @@ void evaluate_l1_llc_ram_with_prime_probe() {
 	const char * dstfilename = concat(VARIATION_ANALYSIS_DATA_DIRECTORY,
 			"l1_llc_ram_prime+probe_evaluation.data");
 	int analysedsize = 0;
-	analysedsize = hitevaluation(l1nrsets,l1nrways,bytescacheline,bitsofoffset,1,evaluation, analysedsize);
-	analysedsize = hitevaluation(llcnrsets,llcnrways,bytescacheline,bitsofoffset,1, evaluation, analysedsize);
-	analysedsize = hitevaluation(llcnrsets*2,llcnrways*2,bytescacheline,bitsofoffset,1, evaluation, analysedsize);
+	int maxruns = 10000;
+	printf( "L1: \n");
+	analysedsize = hitevaluation(l1nrsets,l1nrways,bytescacheline,bitsofoffset,1, maxruns, evaluation, analysedsize);
+	printf( "LLC: \n");
+	analysedsize = hitevaluation(llcnrsets,llcnrways,bytescacheline,bitsofoffset,1, maxruns, evaluation, analysedsize);
+	printf( "2xLLC: \n");
+	analysedsize = hitevaluation(llcnrsets*2,llcnrways*2,bytescacheline,bitsofoffset,1, maxruns, evaluation, analysedsize);
 
-	arraytocsv(dstfilename, 1, analysedsize, evaluation);
+	int scale = 1;
+
+	arraytocsv(dstfilename, scale, analysedsize, evaluation);
 }
 
 //Test L1,LLC and RAM cycles of misses
@@ -655,11 +674,17 @@ void evaluate_l1_llc_ram_with_prime_access_probe() {
 	const char * dstfilename = concat(VARIATION_ANALYSIS_DATA_DIRECTORY,
 			"l1_llc_ram_prime+access+probe_evaluation.data");
 	int analysedsize = 0;
-	analysedsize = missevaluation(l1nrsets,l1nrways,bytescacheline,bitsofoffset,1,evaluation, analysedsize);
-	analysedsize = missevaluation(llcnrsets,llcnrways,bytescacheline,bitsofoffset,1, evaluation, analysedsize);
-	analysedsize = missevaluation(llcnrsets*2,llcnrways*2,bytescacheline,bitsofoffset,1, evaluation, analysedsize);
+	int maxruns = 10000;
+	printf("L1: \n");
+	analysedsize = missevaluation(l1nrsets,l1nrways,bytescacheline,bitsofoffset,1, maxruns, evaluation, analysedsize);
+	printf("LLC: \n");
+	analysedsize = missevaluation(llcnrsets,llcnrways,bytescacheline,bitsofoffset,1, maxruns, evaluation, analysedsize);
+	printf("2xLLC: \n");
+	analysedsize = missevaluation(llcnrsets*2,llcnrways*2,bytescacheline,bitsofoffset,1, maxruns, evaluation, analysedsize);
 
-	arraytocsv(dstfilename, 1,analysedsize, evaluation);
+	int scale = 1;
+
+	arraytocsv(dstfilename, scale, analysedsize, evaluation);
 }
 
 //To generate the mean graphs
@@ -767,9 +792,11 @@ int main() {
 	//TWO_evaluate_l1_llc_ram();
 
 	//Evaluate Prime+Probe
+	printf("Evaluating Prime+Probe...\n");
 	evaluate_l1_llc_ram_with_prime_probe();
 
 	//Evaluate Prime+Access+Probe
+	printf("Evaluating Prime+Access+Probe...\n");
 	evaluate_l1_llc_ram_with_prime_access_probe();
 
 	//Generate histograms
